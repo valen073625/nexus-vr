@@ -1,0 +1,98 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+:root {
+  --bg: #0f0f12;
+  --surface: #1a1a22;
+  --border: #2a2a35;
+  --text: #e8e8ed;
+  --text-muted: #9a9aa8;
+  --accent: #7c5cfc;
+  --accent-hover: #9178ff;
+}
+
+html, body, #root {
+  height: 100%;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+}
+
+.app {
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.header {
+  padding: 24px 32px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.header h1 {
+  font-size: 1.5rem;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+.subtitle {
+  margin-top: 4px;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+}
+
+.main {
+  flex: 1;
+  padding: 32px;
+  display: grid;
+  gap: 20px;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  align-content: start;
+}
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 20px 24px;
+}
+
+.card h2 {
+  font-size: 1.05rem;
+  margin-bottom: 12px;
+  font-weight: 600;
+}
+
+.card p {
+  color: var(--text-muted);
+  line-height: 1.5;
+  margin-bottom: 8px;
+}
+
+.hint {
+  font-size: 0.85rem;
+  opacity: 0.8;
+}
+
+.card ul {
+  list-style: none;
+  color: var(--text-muted);
+}
+
+.card li {
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.card li:last-child {
+  border-bottom: none;
+}
+
+.card li::before {
+  content: '▸ ';
+  color: var(--accent);
+}
