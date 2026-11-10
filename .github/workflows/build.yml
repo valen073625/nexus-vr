@@ -1,0 +1,62 @@
+name: Build Windows EXE
+
+on:
+  push:
+    branches: [ main, master ]
+    tags:
+      - 'v*'
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build Nexus Launcher (Windows x64 Portable)
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout código
+        uses: actions/checkout@v4
+
+      - name: Configurar Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Instalar dependencias
+        run: npm ci
+
+      - name: Compilar TypeScript (main process)
+        run: npm run build:main
+
+      - name: Compilar React (renderer)
+        run: npm run build:renderer
+
+      - name: Compilar preload
+        run: npx tsc -p tsconfig.main.json
+
+      - name: Generar ejecutable portable .exe
+        run: npx electron-builder --win portable --x64
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Reemplaza con tu Client ID de Microsoft Entra:
+          MS_CLIENT_ID: ${{ secrets.MS_CLIENT_ID }}
+
+      - name: Subir artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Nexus-Launcher-Windows
+          path: release/*.exe
+          retention-days: 30
+          if-no-files-found: error
+
+      - name: Crear Release (solo en tags)
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release/*.exe
+          generate_release_notes: true
+          name: "Nexus Launcher ${{ github.ref_name }}"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
