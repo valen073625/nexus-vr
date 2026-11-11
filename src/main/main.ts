@@ -5,6 +5,7 @@ import { setupSettingsHandlers } from './ipc/settingsHandlers'
 import { setupProfileHandlers } from './ipc/profileHandlers'
 import { setupVersionHandlers } from './ipc/versionHandlers'
 import { setupLaunchHandlers } from './ipc/launchHandlers'
+import { setupSkinHandlers } from './ipc/skinHandlers'
 import { launchService } from './services/launch'
 
 log.initialize()
@@ -16,7 +17,7 @@ let gameSessionActive = false
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1100,
-    height: 700,
+    height: 720,
     minWidth: 900,
     minHeight: 600,
     backgroundColor: '#0f0f12',
@@ -70,6 +71,7 @@ app.whenReady().then(() => {
   setupProfileHandlers()
   setupVersionHandlers()
   setupLaunchHandlers()
+  setupSkinHandlers()
 
   launchService.setOnGameExit((code) => {
     log.info('Game session ended, restoring launcher. exit code:', code)

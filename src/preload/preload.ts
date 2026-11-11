@@ -21,6 +21,15 @@ const api = {
   isGameRunning: () => ipcRenderer.invoke('launch:isRunning'),
   hideLauncherWindow: () => ipcRenderer.send('launch:hide-window'),
 
+  // Skins
+  listSkins: () => ipcRenderer.invoke('skins:list'),
+  getActiveSkin: () => ipcRenderer.invoke('skins:getActive'),
+  setActiveSkin: (id: string | null) => ipcRenderer.invoke('skins:setActive', id),
+  importSkin: () => ipcRenderer.invoke('skins:import'),
+  deleteSkin: (id: string) => ipcRenderer.invoke('skins:delete', id),
+  getSkinDataUrl: (id: string) => ipcRenderer.invoke('skins:getDataUrl', id),
+  getActiveSkinDataUrl: () => ipcRenderer.invoke('skins:getActiveDataUrl'),
+
   onLaunchProgress: (callback: (info: {
     stage: string
     current: number

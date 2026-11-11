@@ -1,4 +1,5 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useState } from 'react'
+import SkinPreview from './components/SkinPreview'
 
 type ProgressInfo = {
   stage: string
@@ -13,6 +14,13 @@ type VersionItem = {
   releaseTime: string
 }
 
+type SkinInfo = {
+  id: string
+  name: string
+  fileName: string
+  createdAt: string
+}
+
 export default function App() {
   const [username, setUsername] = useState('Player')
   const [versionId, setVersionId] = useState('1.19.1')
@@ -25,6 +33,24 @@ export default function App() {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  const [skins, setSkins] = useState<SkinInfo[]>([])
+  const [activeSkinId, setActiveSkinId] = useState<string | null>(null)
+  const [skinDataUrl, setSkinDataUrl] = useState<string | null>(null)
+  const [skinBusy, setSkinBusy] = useState(false)
+  const [skinMsg, setSkinMsg] = useState<string | null>(null)
+
+  const refreshSkins = useCallback(async () => {
+    const list = await window.nexus.listSkins()
+    setSkins(list.skins || [])
+    setActiveSkinId(list.activeId || null)
+    if (list.activeId) {
+      const url = await window.nexus.getSkinDataUrl(list.activeId)
+      setSkinDataUrl(url)
+    } else {
+      setSkinDataUrl(null)
+    }
+  }, [])
+
   useEffect(() => {
     const unsubProgress = window.nexus.onLaunchProgress((info) => {
       setProgress(info)
@@ -32,7 +58,7 @@ export default function App() {
     })
     const unsubExit = window.nexus.onGameExited(() => {
       setBusy(false)
-      setStatus('Minecraft cerrado — launcher listo')
+      setStatus('Minecraft cerrado \u2014 launcher listo')
       setProgress(null)
     })
     return () => {
@@ -69,31 +95,28 @@ export default function App() {
 
         const exists = (playable.versions || []).some((v: VersionItem) => v.id === preferred)
         setVersionId(exists ? preferred : playable.versions?.[0]?.id || '1.19.1')
-
-        if (settings?.username) {
-          // no username in settings yet — ignore
-        }
       } catch (e: any) {
         if (!cancelled) setVersionsError(e?.message || String(e))
       } finally {
         if (!cancelled) setVersionsLoading(false)
       }
     })()
+    refreshSkins().catch(() => {})
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [refreshSkins])
 
   const percent =
     progress && progress.total > 0
       ? Math.min(100, Math.round((progress.current / progress.total) * 100))
       : null
 
-  const versionLabel = useMemo(() => versionId || '—', [versionId])
+  const versionLabel = useMemo(() => versionId || '\u2014', [versionId])
 
   async function handleLaunch() {
     if (!versionId) {
-      setError('Selecciona una versión')
+      setError('Selecciona una versi\u00f3n')
       return
     }
     setBusy(true)
@@ -106,8 +129,7 @@ export default function App() {
       })
       if (result.success) {
         setStatus('Minecraft iniciado')
-        setProgress({ stage: 'done', current: 1, total: 1, message: 'Juego en ejecución' })
-        // Ocultar launcher; se reabre al cerrar el juego
+        setProgress({ stage: 'done', current: 1, total: 1, message: 'Juego en ejecuci\u00f3n' })
         window.nexus.hideLauncherWindow()
       } else {
         setError(result.error || 'Error desconocido')
@@ -121,6 +143,35 @@ export default function App() {
     }
   }
 
+  async function handleImportSkin() {
+    setSkinBusy(true)
+    setSkinMsg(null)
+    try {
+      const result = await window.nexus.importSkin()
+      if (result.canceled) return
+      if (!result.success) {
+        setSkinMsg(result.error || 'No se pudo importar')
+        return
+      }
+      setSkinMsg(`Skin "${result.skin.name}" agregada`)
+      await refreshSkins()
+    } catch (e: any) {
+      setSkinMsg(e?.message || String(e))
+    } finally {
+      setSkinBusy(false)
+    }
+  }
+
+  async function handleSelectSkin(id: string) {
+    await window.nexus.setActiveSkin(id)
+    await refreshSkins()
+  }
+
+  async function handleDeleteSkin(id: string) {
+    await window.nexus.deleteSkin(id)
+    await refreshSkins()
+  }
+
   return (
     <div className="app">
       <header className="header">
@@ -128,7 +179,68 @@ export default function App() {
         <p className="subtitle">Minecraft: Java Edition</p>
       </header>
 
-      <main className="main">
+      <main className="main main-skins">
+        {/* Columna skin */}
+        <section className="card skin-card">
+          <h2>Skin del jugador</h2>
+
+          <div className="skin-layout">
+            <div className="skin-stage">
+              <SkinPreview
+                dataUrl={skinDataUrl}
+                username={username.trim() || 'Player'}
+                size={180}
+              />
+            </div>
+
+            <div className="skin-actions">
+              <p className="hint skin-hint">
+                Agrega una imagen PNG de skin (64\u00d764). Se guarda en el launcher y puedes cambiarla cuando quieras.
+              </p>
+              <button
+                className="secondary-btn"
+                onClick={handleImportSkin}
+                disabled={skinBusy || busy}
+              >
+                {skinBusy ? 'Importando...' : 'Agregar imagen de la skin'}
+              </button>
+              {skinMsg && <div className="ok">{skinMsg}</div>}
+
+              {skins.length > 0 && (
+                <div className="skin-list">
+                  <div className="skin-list-title">Skins guardadas</div>
+                  {skins.map((s) => (
+                    <div
+                      key={s.id}
+                      className={`skin-item ${s.id === activeSkinId ? 'active' : ''}`}
+                    >
+                      <button
+                        type="button"
+                        className="skin-item-name"
+                        onClick={() => handleSelectSkin(s.id)}
+                        disabled={busy}
+                      >
+                        {s.name}
+                        {s.id === activeSkinId ? ' \u2713' : ''}
+                      </button>
+                      <button
+                        type="button"
+                        className="skin-item-del"
+                        onClick={() => handleDeleteSkin(s.id)}
+                        disabled={busy}
+                        title="Eliminar"
+                      >
+                        \u00d7
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </section>
+
+        {/* Columna jugar */}
         <section className="card launch-card">
           <h2>Jugar</h2>
 
@@ -144,7 +256,7 @@ export default function App() {
           </label>
 
           <label className="field">
-            <span>Versión {latest ? `(última: ${latest})` : ''}</span>
+            <span>Versi\u00f3n {latest ? `(\u00faltima: ${latest})` : ''}</span>
             {versionsLoading ? (
               <div className="hint">Cargando versiones...</div>
             ) : versionsError ? (
@@ -158,7 +270,7 @@ export default function App() {
                 {versions.map((v) => (
                   <option key={v.id} value={v.id}>
                     {v.id}
-                    {v.id === latest ? ' — última' : ''}
+                    {v.id === latest ? ' \u2014 \u00faltima' : ''}
                   </option>
                 ))}
               </select>
@@ -166,9 +278,8 @@ export default function App() {
           </label>
 
           <p className="hint">
-            Releases desde <strong>1.8.9</strong> hasta la última. Modo offline (singleplayer).
-            Versiones recientes necesitan <strong>Java 17+</strong>; las muy antiguas (1.8–~1.16)
-            pueden requerir Java 8.
+            Releases desde <strong>1.8.9</strong> hasta la \u00faltima. Al jugar el launcher se oculta y
+            vuelve al cerrar Minecraft.
           </p>
 
           <button className="play-btn" onClick={handleLaunch} disabled={busy || versionsLoading}>
@@ -189,16 +300,6 @@ export default function App() {
             )}
             {error && <div className="error">{error}</div>}
           </div>
-        </section>
-
-        <section className="card">
-          <h2>Comportamiento</h2>
-          <ul>
-            <li>Al jugar, el launcher se oculta</li>
-            <li>Al cerrar Minecraft, el launcher vuelve a abrirse</li>
-            <li>La primera vez descarga esa versión (puede tardar)</li>
-            <li>Login Microsoft aún no implementado</li>
-          </ul>
         </section>
       </main>
     </div>
