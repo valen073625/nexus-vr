@@ -8,6 +8,7 @@ export function SettingsScreen() {
   const [jvmArgs, setJvmArgs] = useState('')
   const [saved, setSaved] = useState(false)
   const [javaStatus, setJavaStatus] = useState<'idle' | 'checking' | 'found' | 'missing'>('idle')
+  const [javaWipe, setJavaWipe] = useState('')
 
   useEffect(() => {
     window.nexus.settings.get().then(s => {
@@ -34,6 +35,13 @@ export function SettingsScreen() {
     const r = await window.nexus.java.detect('1.20.1')
     if (r.success && r.javaPath) { setJavaPath(r.javaPath); setJavaStatus('found') }
     else setJavaStatus('missing')
+  }
+
+  async function wipeJava() {
+    if (!window.confirm('Esto borra solo los Java que descargo Nexus. El Java instalado en Windows no se toca.')) return
+    setJavaWipe('')
+    const r = await window.nexus.java.deleteDownloaded()
+    setJavaWipe(r.success ? 'Javas descargados eliminados. Se volveran a bajar al jugar si faltan.' : (r.error || 'No se pudo borrar'))
   }
 
   return (
@@ -65,6 +73,12 @@ export function SettingsScreen() {
         </div>
         {javaStatus === 'found' && <p className="status-ok">Java detectado</p>}
         {javaStatus === 'missing' && <p className="status-warn">No hay Java de esa version. Se descarga al jugar.</p>}
+      </div>
+      <div className="card">
+        <h3>Javas descargados</h3>
+        <p className="card-desc">Aparte de la configuracion. Borra la carpeta de runtimes que bajo el launcher (8, 16, 17, 21, 25). No desinstala Java del sistema.</p>
+        <button className="btn-sec" onClick={wipeJava}>Eliminar Javas descargados</button>
+        {javaWipe && <p className="card-desc">{javaWipe}</p>}
       </div>
       <div className="card">
         <h3>Memoria RAM</h3>
