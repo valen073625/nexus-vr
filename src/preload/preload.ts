@@ -36,6 +36,7 @@ const api = {
   java: {
     detect: (versionId: string) => ipcRenderer.invoke('java:detect', versionId),
     download: (majorVersion: number) => ipcRenderer.invoke('java:download', majorVersion),
+    deleteDownloaded: () => ipcRenderer.invoke('java:deleteDownloaded'),
   },
   skins: {
     list: () => ipcRenderer.invoke('skins:list'),
