@@ -126,7 +126,6 @@ export class InstallService {
     const versionJsonPath = path.join(versionsDir, `${versionId}.json`)
     await fs.promises.writeFile(versionJsonPath, JSON.stringify(versionJson, null, 2), 'utf-8')
 
-    // Client jar
     const client = versionJson.downloads?.client
     if (!client?.url) throw new Error('Version JSON sin client download')
     const clientJar = path.join(versionsDir, `${versionId}.jar`)
@@ -135,7 +134,6 @@ export class InstallService {
       report('client', d, t || client.size || 1, 'Descargando client.jar...')
     })
 
-    // Libraries
     const libraries: Library[] = versionJson.libraries || []
     const libDir = path.join(gameDir, 'libraries')
     const nativesDir = path.join(versionsDir, 'natives')
@@ -149,10 +147,8 @@ export class InstallService {
         libsToDownload.push({ artifact: lib.downloads.artifact, isNative: false })
       }
 
-      // Natives
       const classifierKey = lib.natives?.[this.getOsName()]
       if (classifierKey && lib.downloads?.classifiers) {
-        // Reemplazar ${arch}
         const key = classifierKey.replace('${arch}', process.arch === 'x64' ? '64' : '32')
         const nativeArt = lib.downloads.classifiers[key] || lib.downloads.classifiers[classifierKey]
         if (nativeArt) {
@@ -164,37 +160,31 @@ export class InstallService {
     let libDone = 0
     for (const item of libsToDownload) {
       const dest = path.join(libDir, item.artifact.path)
-      report('libraries', libDone, libsToDownload.length, `Biblioteca: ${path.basename(item.artifact.path)}`)
+      report(
+        'libraries',
+        libDone,
+        libsToDownload.length,
+        `Biblioteca: ${path.basename(item.artifact.path)}`
+      )
       await this.downloadFile(item.artifact.url, dest, item.artifact.sha1)
 
       if (item.isNative) {
         try {
-          await extract(dest, {
-            dir: nativesDir,
-            onEntry: (entry) => {
-              // Evitar META-INF basura
-              if (entry.fileName.startsWith('META-INF/')) {
-                entry.fileName = '' // extract-zip skips empty?
-              }
-            },
-          } as any)
-        } catch (err: any) {
-          // extract-zip onEntry may not support skip; extract all and ignore META-INF at launch
-          log.warn('Native extract warning:', err.message)
           await extract(dest, { dir: nativesDir })
+        } catch (err: any) {
+          log.warn('Native extract warning:', err.message)
         }
       }
       libDone++
     }
     report('libraries', libsToDownload.length, libsToDownload.length, 'Bibliotecas listas')
 
-    // Assets
     const assetIndex = versionJson.assetIndex
     if (assetIndex?.url) {
       const indexesDir = path.join(gameDir, 'assets', 'indexes')
       await this.ensureDir(indexesDir)
       const indexPath = path.join(indexesDir, `${assetIndex.id}.json`)
-      report('assets', 0, 1, 'Descargando índice de assets...')
+      report('assets', 0, 1, 'Descargando indice de assets...')
       await this.downloadFile(assetIndex.url, indexPath, assetIndex.sha1)
 
       const indexData = JSON.parse(await fs.promises.readFile(indexPath, 'utf-8'))
@@ -204,7 +194,6 @@ export class InstallService {
 
       let assetDone = 0
       const totalAssets = entries.length
-      // Descargar en lotes pequeños para no saturar
       const concurrency = 8
       for (let i = 0; i < entries.length; i += concurrency) {
         const batch = entries.slice(i, i + concurrency)
@@ -222,7 +211,7 @@ export class InstallService {
       }
     }
 
-    report('done', 1, 1, 'Instalación completa')
+    report('done', 1, 1, 'Instalacion completa')
     return { versionJsonPath, versionJson }
   }
 }
