@@ -166,7 +166,7 @@ export default function App() {
         setSkinMsg(result.error || 'No se pudo importar')
         return
       }
-      setSkinMsg('Skin "' + result.skin.name + '" agregada')
+      setSkinMsg('Skin "' + result.skin.name + '" agregada (se aplica al jugar)')
       await refreshSkins()
     } catch (e: any) {
       setSkinMsg(e?.message || String(e))
@@ -207,7 +207,7 @@ export default function App() {
 
             <div className="skin-actions">
               <p className="hint skin-hint">
-                Agrega una imagen PNG de skin (64x64). Se guarda en el launcher y puedes cambiarla cuando quieras.
+                PNG 64x64. La skin activa se inyecta en el juego (offline) al pulsar Jugar.
               </p>
               <button
                 className="secondary-btn"
@@ -288,8 +288,8 @@ export default function App() {
           </label>
 
           <p className="hint">
-            1.18+ necesita <strong>Java 17+</strong>. 1.20.5+ necesita <strong>Java 21</strong>.
-            Versiones viejas (1.8-1.16) funcionan mejor con Java 8/11.
+            Java <strong>17</strong> y <strong>21</strong> se usan del sistema si ya los tienes;
+            si no, el launcher los descarga solo (una vez).
           </p>
 
           <button className="play-btn" onClick={handleLaunch} disabled={busy || versionsLoading}>
@@ -309,9 +309,7 @@ export default function App() {
               </div>
             )}
             {error && <div className="error">{error}</div>}
-            {crashLog && (
-              <pre className="crash-log">{crashLog}</pre>
-            )}
+            {crashLog && <pre className="crash-log">{crashLog}</pre>}
           </div>
         </section>
       </main>
