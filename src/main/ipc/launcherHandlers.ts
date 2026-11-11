@@ -81,4 +81,13 @@ export function setupLauncherHandlers(mainWindow: BrowserWindow) {
       return { success: false, error: err.message }
     }
   })
+
+  ipcMain.handle('java:deleteDownloaded', async () => {
+    try {
+      const result = runtimes.deleteDownloaded()
+      return { success: true, path: result.path }
+    } catch (err: any) {
+      return { success: false, error: err.message }
+    }
+  })
 }
