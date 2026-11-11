@@ -32,6 +32,7 @@ export default function App() {
   const [progress, setProgress] = useState<ProgressInfo | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [crashLog, setCrashLog] = useState<string | null>(null)
 
   const [skins, setSkins] = useState<SkinInfo[]>([])
   const [activeSkinId, setActiveSkinId] = useState<string | null>(null)
@@ -56,10 +57,18 @@ export default function App() {
       setProgress(info)
       setStatus(info.message)
     })
-    const unsubExit = window.nexus.onGameExited(() => {
+    const unsubExit = window.nexus.onGameExited((info) => {
       setBusy(false)
-      setStatus('Minecraft cerrado - launcher listo')
       setProgress(null)
+      if (info.quickCrash) {
+        setStatus('Minecraft se cerro al instante')
+        setError(info.message || 'Crash al iniciar. Mira el log abajo.')
+        setCrashLog(info.logTail || null)
+      } else {
+        setStatus('Minecraft cerrado - launcher listo')
+        setError(null)
+        setCrashLog(null)
+      }
     })
     return () => {
       unsubProgress()
@@ -121,6 +130,7 @@ export default function App() {
     }
     setBusy(true)
     setError(null)
+    setCrashLog(null)
     setStatus('Preparando...')
     try {
       const result = await window.nexus.launchGame({
@@ -129,6 +139,9 @@ export default function App() {
       })
       if (result.success) {
         setStatus('Minecraft iniciado')
+        if (result.javaWarning) {
+          setError(result.javaWarning)
+        }
         setProgress({ stage: 'done', current: 1, total: 1, message: 'Juego en ejecucion' })
         window.nexus.hideLauncherWindow()
       } else {
@@ -275,8 +288,8 @@ export default function App() {
           </label>
 
           <p className="hint">
-            Releases desde <strong>1.8.9</strong> hasta la ultima. Al jugar el launcher se oculta y
-            vuelve al cerrar Minecraft.
+            1.18+ necesita <strong>Java 17+</strong>. 1.20.5+ necesita <strong>Java 21</strong>.
+            Versiones viejas (1.8-1.16) funcionan mejor con Java 8/11.
           </p>
 
           <button className="play-btn" onClick={handleLaunch} disabled={busy || versionsLoading}>
@@ -296,6 +309,9 @@ export default function App() {
               </div>
             )}
             {error && <div className="error">{error}</div>}
+            {crashLog && (
+              <pre className="crash-log">{crashLog}</pre>
+            )}
           </div>
         </section>
       </main>
