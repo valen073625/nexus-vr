@@ -110,6 +110,7 @@ export class LaunchService {
       await fs.promises.mkdir(gameDir, { recursive: true })
 
       const { versionJson } = await this.install.installVersion(versionId, gameDir, options.onProgress)
+      const manifestMajor = Number(versionJson?.javaVersion?.majorVersion) || undefined
 
       options.onProgress?.({
         stage: 'java',
@@ -118,7 +119,7 @@ export class LaunchService {
         message: 'Preparando Java...',
       })
 
-      const required = this.java.requiredJavaMajor(versionId)
+      const required = this.java.requiredJavaMajor(versionId, manifestMajor)
       const { javaPath, major: javaMajor } = await this.runtimes.resolveForMinecraft(
         versionId,
         settings.javaPath,
@@ -129,18 +130,13 @@ export class LaunchService {
             total: total || 1,
             message: msg,
           })
-        }
+        },
+        manifestMajor
       )
 
       const javaVerStr = await this.java.getJavaVersion(javaPath)
       log.info('Using Java:', javaPath, javaVerStr, 'major=', javaMajor, 'required=', required)
 
-      let javaWarning: string | undefined
-      if (required <= 8 && javaMajor >= 17) {
-        javaWarning = `Minecraft ${versionId} es antigua; si falla, avisa y añadimos Java 8 automatico.`
-      }
-
-      // Skin offline via authlib-injector
       let agentArg: string | null = null
       try {
         const skinPath = this.skins.getActiveFilePath()
@@ -208,7 +204,7 @@ export class LaunchService {
         '${version_type}': versionJson.type || 'release',
         '${natives_directory}': nativesDir,
         '${launcher_name}': 'nexus-launcher',
-        '${launcher_version}': '1.0.0',
+        '${launcher_version}': '1.0.1',
         '${classpath}': classpath,
         '${user_properties}': '{}',
         '${clientid}': '0',
@@ -222,21 +218,12 @@ export class LaunchService {
         `-Xms${settings.minRam || 512}M`,
       ]
 
-      // authlib-injector DEBE ir temprano en JVM args
       if (agentArg) {
         jvmArgs.push(agentArg)
       }
 
       if (settings.jvmArgs?.trim()) {
         jvmArgs.push(...settings.jvmArgs.trim().split(/\s+/).filter(Boolean))
-      }
-
-      if (javaMajor >= 9 && required <= 8) {
-        jvmArgs.push(
-          '--add-opens=java.base/java.lang=ALL-UNNAMED',
-          '--add-opens=java.base/java.lang.reflect=ALL-UNNAMED',
-          '--add-opens=java.base/java.io=ALL-UNNAMED'
-        )
       }
 
       let hasCp = false
@@ -394,7 +381,7 @@ export class LaunchService {
             logTail.toLowerCase().includes('unsupportedclassversion') ||
             logTail.includes('has been compiled by a more recent')
           ) {
-            message = 'Java demasiado viejo para esta version. El launcher deberia bajar Java 17/21 automaticamente; reintenta.'
+            message = `Java demasiado viejo para esta version. Hace falta Java ${required}. Borra la carpeta java/${required} del launcher y reintenta.`
           } else if (
             logTail.toLowerCase().includes('unsatisfiedlinkerror') ||
             logTail.toLowerCase().includes('no lwjgl')
@@ -434,7 +421,7 @@ export class LaunchService {
         // ignore
       }
 
-      return { success: true, pid, javaWarning }
+      return { success: true, pid }
     } catch (err: any) {
       log.error('Launch failed:', err)
       await skinServer.stop().catch(() => {})
