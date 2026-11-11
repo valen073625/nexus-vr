@@ -1,4 +1,4 @@
-import { ipcMain, BrowserWindow } from 'electron'
+import { ipcMain, BrowserWindow, app } from 'electron'
 import { LauncherService, type OptimizeOptions } from '../services/launcher'
 import { DownloaderService } from '../services/downloader'
 import { JavaService } from '../services/java'
@@ -54,6 +54,7 @@ export function setupLauncherHandlers(mainWindow: BrowserWindow) {
         profileData: options.profileData,
         optimize: options.optimize,
       })
+      setTimeout(() => app.quit(), 600)
       return { success: true }
     } catch (err: any) {
       log.error('[Launcher] Error al lanzar:', err)
