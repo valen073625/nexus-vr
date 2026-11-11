@@ -1,7 +1,7 @@
 {
   "name": "nexus-launcher",
-  "version": "1.0.1",
-  "description": "Nexus Launcher - Launcher moderno para Minecraft: Java Edition",
+  "version": "1.0.2",
+  "description": "Nexus Launcher - Launcher para Minecraft: Java Edition",
   "main": "dist/main/main.js",
   "author": "Nexus Launcher",
   "license": "MIT",
@@ -14,8 +14,7 @@
     "build:main": "tsc -p tsconfig.main.json",
     "build:renderer": "vite build",
     "dist": "npm run build && electron-builder",
-    "dist:win": "npm run build && electron-builder --win nsis --x64",
-    "lint": "eslint src --ext .ts,.tsx"
+    "dist:win": "npm run build && electron-builder --win nsis --x64"
   },
   "dependencies": {
     "@azure/msal-node": "^2.16.2",
@@ -42,22 +41,12 @@
   "build": {
     "appId": "com.nexuslauncher.app",
     "productName": "Nexus Launcher",
-    "directories": {
-      "output": "release"
-    },
-    "files": [
-      "dist/**/*",
-      "package.json"
-    ],
+    "directories": { "output": "release" },
+    "files": ["dist/**/*", "package.json"],
+    "extraResources": [{ "from": "assets/icon.ico", "to": "icon.ico" }],
     "win": {
-      "target": [
-        {
-          "target": "nsis",
-          "arch": ["x64"]
-        }
-      ],
-      "icon": "assets/icon.ico",
-      "signAndEditExecutable": false
+      "target": [{ "target": "nsis", "arch": ["x64"] }],
+      "icon": "assets/icon.ico"
     },
     "nsis": {
       "oneClick": false,
@@ -66,6 +55,8 @@
       "createDesktopShortcut": "always",
       "createStartMenuShortcut": true,
       "shortcutName": "Nexus Launcher",
+      "installerIcon": "assets/icon.ico",
+      "uninstallerIcon": "assets/icon.ico",
       "artifactName": "Nexus-Launcher-${version}-Setup.exe",
       "deleteAppDataOnUninstall": false,
       "runAfterFinish": true
