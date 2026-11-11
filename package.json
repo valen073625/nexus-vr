@@ -1,6 +1,6 @@
 {
   "name": "nexus-launcher",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Nexus Launcher - Launcher moderno para Minecraft: Java Edition",
   "main": "dist/main/main.js",
   "author": "Nexus Launcher",
@@ -14,7 +14,7 @@
     "build:main": "tsc -p tsconfig.main.json",
     "build:renderer": "vite build",
     "dist": "npm run build && electron-builder",
-    "dist:win": "npm run build && electron-builder --win portable --x64",
+    "dist:win": "npm run build && electron-builder --win nsis --x64",
     "lint": "eslint src --ext .ts,.tsx"
   },
   "dependencies": {
@@ -54,24 +54,21 @@
         {
           "target": "nsis",
           "arch": ["x64"]
-        },
-        {
-          "target": "portable",
-          "arch": ["x64"]
         }
-      ]
+      ],
+      "icon": "assets/icon.ico",
+      "signAndEditExecutable": false
     },
     "nsis": {
       "oneClick": false,
+      "perMachine": false,
       "allowToChangeInstallationDirectory": true,
-      "createDesktopShortcut": true,
+      "createDesktopShortcut": "always",
       "createStartMenuShortcut": true,
       "shortcutName": "Nexus Launcher",
       "artifactName": "Nexus-Launcher-${version}-Setup.exe",
-      "deleteAppDataOnUninstall": false
-    },
-    "portable": {
-      "artifactName": "Nexus-Launcher-${version}-portable.exe"
+      "deleteAppDataOnUninstall": false,
+      "runAfterFinish": true
     }
   }
 }
