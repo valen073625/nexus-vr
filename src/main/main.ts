@@ -5,11 +5,13 @@ import { setupSettingsHandlers } from './ipc/settingsHandlers'
 import { setupProfileHandlers } from './ipc/profileHandlers'
 import { setupVersionHandlers } from './ipc/versionHandlers'
 import { setupLaunchHandlers } from './ipc/launchHandlers'
+import { launchService } from './services/launch'
 
 log.initialize()
 log.info('Nexus Launcher starting...')
 
 let mainWindow: BrowserWindow | null = null
+let gameSessionActive = false
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -35,12 +37,32 @@ function createWindow() {
   }
 
   mainWindow.once('ready-to-show', () => {
-    mainWindow?.show()
+    if (!gameSessionActive) {
+      mainWindow?.show()
+    }
   })
 
   mainWindow.on('closed', () => {
     mainWindow = null
   })
+}
+
+function showLauncher() {
+  gameSessionActive = false
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    createWindow()
+    return
+  }
+  if (mainWindow.isMinimized()) mainWindow.restore()
+  mainWindow.show()
+  mainWindow.focus()
+}
+
+function hideLauncher() {
+  gameSessionActive = true
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.hide()
+  }
 }
 
 app.whenReady().then(() => {
@@ -49,16 +71,37 @@ app.whenReady().then(() => {
   setupVersionHandlers()
   setupLaunchHandlers()
 
+  // Cuando Minecraft cierra, volver a mostrar el launcher
+  launchService.setOnGameExit((code) => {
+    log.info('Game session ended, restoring launcher. exit code:', code)
+    showLauncher()
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('launch:game-exited', { code })
+    }
+  })
+
+  // Interceptar lanzamiento exitoso para ocultar la ventana
+  const { ipcMain } = require('electron') as typeof import('electron')
+  ipcMain.on('launch:hide-window', () => {
+    hideLauncher()
+  })
+
   createWindow()
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
       createWindow()
+    } else if (!gameSessionActive) {
+      showLauncher()
     }
   })
 })
 
 app.on('window-all-closed', () => {
+  // Si el juego sigue corriendo, no cerrar la app (launcher oculto)
+  if (gameSessionActive || launchService.isGameRunning()) {
+    return
+  }
   if (process.platform !== 'darwin') {
     app.quit()
   }
@@ -69,9 +112,7 @@ if (!gotTheLock) {
   app.quit()
 } else {
   app.on('second-instance', () => {
-    if (mainWindow) {
-      if (mainWindow.isMinimized()) mainWindow.restore()
-      mainWindow.focus()
-    }
+    if (gameSessionActive) return
+    showLauncher()
   })
 }

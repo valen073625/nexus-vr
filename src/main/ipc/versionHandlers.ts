@@ -15,6 +15,16 @@ export function setupVersionHandlers() {
     }
   })
 
+  ipcMain.handle('versions:getPlayable', async () => {
+    try {
+      const data = await versionsService.getPlayableVersions()
+      return { success: true, ...data }
+    } catch (err: any) {
+      log.error('Get playable versions error:', err)
+      return { success: false, error: err.message }
+    }
+  })
+
   ipcMain.handle('versions:getVersionInfo', async (_event, versionId: string) => {
     try {
       const info = await versionsService.getVersionInfo(versionId)

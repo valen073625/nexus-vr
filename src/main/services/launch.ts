@@ -16,21 +16,30 @@ function offlineUUID(username: string): string {
 }
 
 function applyTemplates(arg: string, map: Record<string, string>): string | null {
-  // Si tiene feature rule no soportada, etc. — simplificado
   let result = arg
   for (const [key, value] of Object.entries(map)) {
     result = result.split(key).join(value)
   }
-  // Si queda algún ${} sin reemplazar de features, omitir
   if (/\$\{/.test(result)) return null
   return result
 }
+
+export type GameExitCallback = (code: number | null) => void
 
 export class LaunchService {
   private settings = new SettingsService()
   private java = new JavaService()
   private install = new InstallService()
   private gameProcess: ChildProcess | null = null
+  private onGameExit: GameExitCallback | null = null
+
+  setOnGameExit(cb: GameExitCallback | null) {
+    this.onGameExit = cb
+  }
+
+  isGameRunning(): boolean {
+    return this.gameProcess !== null && this.gameProcess.exitCode === null
+  }
 
   async launch(options: {
     versionId: string
@@ -38,6 +47,10 @@ export class LaunchService {
     onProgress?: ProgressCallback
   }): Promise<{ success: true; pid: number } | { success: false; error: string }> {
     try {
+      if (this.isGameRunning()) {
+        return { success: false, error: 'Minecraft ya está en ejecución' }
+      }
+
       const settings = this.settings.getSettings()
       const gameDir = settings.gameDir
       const versionId = options.versionId
@@ -47,7 +60,6 @@ export class LaunchService {
 
       await fs.promises.mkdir(gameDir, { recursive: true })
 
-      // Instalar / verificar
       const { versionJson } = await this.install.installVersion(versionId, gameDir, options.onProgress)
 
       options.onProgress?.({
@@ -67,11 +79,9 @@ export class LaunchService {
       const assetsDir = path.join(gameDir, 'assets')
       const librariesDir = path.join(gameDir, 'libraries')
 
-      // Classpath
       const classpathParts: string[] = []
       for (const lib of versionJson.libraries || []) {
         if (!lib.downloads?.artifact) continue
-        // Reaplicar reglas básicas
         if (lib.rules) {
           let allowed = false
           for (const rule of lib.rules) {
@@ -84,7 +94,6 @@ export class LaunchService {
           }
           if (!allowed) continue
         }
-        // Skip pure natives jars from classpath (those with natives classifier only sometimes still have artifact)
         const artifactPath = path.join(librariesDir, lib.downloads.artifact.path)
         if (fs.existsSync(artifactPath)) {
           classpathParts.push(artifactPath)
@@ -112,7 +121,6 @@ export class LaunchService {
         '${auth_xuid}': '',
       }
 
-      // JVM args
       const jvmArgs: string[] = [
         `-Xmx${settings.maxRam}M`,
         `-Xms${settings.minRam}M`,
@@ -125,14 +133,12 @@ export class LaunchService {
         jvmArgs.push(...settings.jvmArgs.trim().split(/\s+/).filter(Boolean))
       }
 
-      // Argumentos modernos del version JSON
       if (versionJson.arguments?.jvm) {
         for (const arg of versionJson.arguments.jvm) {
           if (typeof arg === 'string') {
             const applied = applyTemplates(arg, replacements)
             if (applied) jvmArgs.push(applied)
           } else if (arg && typeof arg === 'object' && arg.value) {
-            // Evaluar rules simples de OS
             let allow = true
             if (arg.rules) {
               allow = false
@@ -156,18 +162,15 @@ export class LaunchService {
           }
         }
       } else {
-        // Legacy
         jvmArgs.push('-cp', classpath)
       }
 
-      // Asegurar -cp si el JSON no lo puso
       if (!jvmArgs.some((a) => a === '-cp' || a === '-classpath')) {
         jvmArgs.push('-cp', classpath)
       }
 
       const mainClass = versionJson.mainClass || 'net.minecraft.client.main.Main'
 
-      // Game args
       const gameArgs: string[] = []
       if (versionJson.arguments?.game) {
         for (const arg of versionJson.arguments.game) {
@@ -175,12 +178,10 @@ export class LaunchService {
             const applied = applyTemplates(arg, replacements)
             if (applied) gameArgs.push(applied)
           } else if (arg && typeof arg === 'object' && arg.value) {
-            // Omitir args de demo, features, etc. por defecto
             let allow = true
             if (arg.rules) {
               allow = false
               for (const rule of arg.rules) {
-                // Solo permitir si no depende de features
                 if (rule.features) {
                   allow = false
                   break
@@ -213,26 +214,58 @@ export class LaunchService {
         message: 'Iniciando Minecraft...',
       })
 
+      // Sin detached/unref: necesitamos detectar el cierre del juego
       this.gameProcess = spawn(javaPath, fullArgs, {
         cwd: gameDir,
-        detached: true,
+        detached: false,
         stdio: ['ignore', 'pipe', 'pipe'],
+        windowsHide: false,
         env: { ...process.env },
       })
 
+      const pid = this.gameProcess.pid
+      if (!pid) {
+        this.gameProcess = null
+        return { success: false, error: 'No se pudo iniciar el proceso de Minecraft' }
+      }
+
       this.gameProcess.stdout?.on('data', (d) => log.info('[MC]', d.toString().trim()))
       this.gameProcess.stderr?.on('data', (d) => log.warn('[MC]', d.toString().trim()))
+
       this.gameProcess.on('exit', (code) => {
         log.info('Minecraft exited with code', code)
         this.gameProcess = null
+        try {
+          this.onGameExit?.(code)
+        } catch (e) {
+          log.error('onGameExit error', e)
+        }
       })
 
-      this.gameProcess.unref()
+      this.gameProcess.on('error', (err) => {
+        log.error('Minecraft process error', err)
+        this.gameProcess = null
+        try {
+          this.onGameExit?.(1)
+        } catch {
+          // ignore
+        }
+      })
 
-      return { success: true, pid: this.gameProcess.pid! }
+      // Guardar última versión elegida
+      try {
+        this.settings.saveSettings({ selectedVersion: versionId })
+      } catch {
+        // ignore
+      }
+
+      return { success: true, pid }
     } catch (err: any) {
       log.error('Launch failed:', err)
       return { success: false, error: err.message || String(err) }
     }
   }
 }
+
+/** Singleton compartido entre IPC y main */
+export const launchService = new LaunchService()

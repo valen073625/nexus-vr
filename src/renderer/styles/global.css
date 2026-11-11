@@ -81,7 +81,8 @@ html, body, #root {
   color: var(--text-muted);
 }
 
-.field input {
+.field input,
+.field select {
   background: var(--bg);
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -90,8 +91,19 @@ html, body, #root {
   font-size: 0.95rem;
 }
 
-.field input:disabled {
+.field select {
+  cursor: pointer;
+}
+
+.field select option {
+  background: #1a1a22;
+  color: var(--text);
+}
+
+.field input:disabled,
+.field select:disabled {
   opacity: 0.7;
+  cursor: not-allowed;
 }
 
 .hint {

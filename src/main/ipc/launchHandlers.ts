@@ -1,8 +1,6 @@
 import { ipcMain, BrowserWindow } from 'electron'
 import log from 'electron-log'
-import { LaunchService } from '../services/launch'
-
-const launchService = new LaunchService()
+import { launchService } from '../services/launch'
 
 export function setupLaunchHandlers() {
   ipcMain.handle(
@@ -21,7 +19,7 @@ export function setupLaunchHandlers() {
 
       try {
         const result = await launchService.launch({
-          versionId: payload.versionId || '1.19.1',
+          versionId: payload.versionId,
           username: payload.username,
           onProgress,
         })
@@ -32,4 +30,8 @@ export function setupLaunchHandlers() {
       }
     }
   )
+
+  ipcMain.handle('launch:isRunning', () => {
+    return { running: launchService.isGameRunning() }
+  })
 }
