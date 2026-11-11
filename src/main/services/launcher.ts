@@ -4,6 +4,21 @@ import { spawn } from 'child_process'
 import log from 'electron-log'
 import { VersionsService, type VersionInfo, type ArgRule } from './versions'
 import { DownloaderService } from './downloader'
+import { SkinsService } from './skins'
+import { skinServer } from './skinServer'
+
+export interface OptimizeOptions {
+  enabled: boolean
+  renderDistance: number
+  particles: number
+  entityDistance: number
+  maxFps: number
+  vsync: boolean
+  mipmap: number
+  clouds: boolean
+  fastGraphics: boolean
+  smoothLighting: boolean
+}
 
 export interface LaunchOptions {
   versionId: string
@@ -14,23 +29,60 @@ export interface LaunchOptions {
   jvmArgs: string
   profileType: 'microsoft' | 'offline'
   profileData: { username: string; uuid: string; accessToken?: string }
+  optimize?: OptimizeOptions
+}
+
+function writeOptions(gameDir: string, opt: OptimizeOptions) {
+  const file = path.join(gameDir, 'options.txt')
+  const map = new Map<string, string>()
+  if (fs.existsSync(file)) {
+    for (const line of fs.readFileSync(file, 'utf8').split(/\r?\n/)) {
+      const i = line.indexOf(':')
+      if (i > 0) map.set(line.slice(0, i), line.slice(i + 1))
+    }
+  }
+  const set = (k: string, v: string) => map.set(k, v)
+  set('renderDistance', String(opt.renderDistance))
+  set('particles', String(opt.particles))
+  set('entityDistanceScaling', String(opt.entityDistance))
+  set('maxFps', String(opt.maxFps))
+  set('enableVsync', String(opt.vsync))
+  set('mipmapLevels', String(opt.mipmap))
+  set('clouds', String(opt.clouds))
+  set('graphicsMode', opt.fastGraphics ? '0' : '1')
+  set('ao', String(opt.smoothLighting))
+  set('biomeBlendRadius', '0')
+  set('renderClouds', opt.clouds ? 'true' : 'false')
+  const body = Array.from(map.entries()).map(([k, v]) => `${k}:${v}`).join('\n') + '\n'
+  fs.writeFileSync(file, body, 'utf8')
 }
 
 export class LauncherService {
   private vs = new VersionsService()
   private dl = new DownloaderService()
+  private skins = new SkinsService()
 
   async launch(opts: LaunchOptions): Promise<void> {
     const info = await this.vs.getVersionInfo(opts.versionId)
-    const args = this.buildArgs(info, opts)
-
-    log.info(`Lanzando Minecraft ${opts.versionId}`)
-    log.info(`Java: ${opts.javaPath}`)
-    log.info(`Args[0..5]: ${args.slice(0, 5).join(' ')}`)
-
-    // Crear directorio del juego si no existe
     fs.mkdirSync(opts.gameDir, { recursive: true })
+    if (opts.optimize?.enabled) writeOptions(opts.gameDir, opts.optimize)
 
+    let agentArg: string | null = null
+    try {
+      const skinPath = this.skins.getActiveFilePath()
+      if (skinPath) {
+        const skin = await skinServer.start({
+          username: opts.profileData.username,
+          uuid: opts.profileData.uuid,
+          skinPath,
+        })
+        agentArg = skin.agentArg
+      }
+    } catch (e: any) {
+      log.warn('Skin no aplicada:', e.message)
+    }
+
+    const args = this.buildArgs(info, opts, agentArg)
     const proc = spawn(opts.javaPath, args, {
       cwd: opts.gameDir,
       detached: true,
@@ -38,47 +90,46 @@ export class LauncherService {
     })
     proc.unref()
     proc.on('error', err => log.error('Error al lanzar:', err))
-    log.info(`Minecraft iniciado PID: ${proc.pid}`)
+    proc.on('exit', () => { skinServer.stop().catch(() => {}) })
+    log.info(`Minecraft iniciado PID: ${proc.pid} ram=${opts.maxRam}`)
   }
 
-  private buildArgs(info: VersionInfo, opts: LaunchOptions): string[] {
+  private buildArgs(info: VersionInfo, opts: LaunchOptions, agentArg: string | null): string[] {
     const args: string[] = []
-    const libsDir  = path.join(opts.gameDir, 'libraries')
     const verDir   = path.join(opts.gameDir, 'versions', opts.versionId)
     const nativDir = path.join(verDir, 'natives')
     const assetsDir = path.join(opts.gameDir, 'assets')
-
     fs.mkdirSync(nativDir, { recursive: true })
-
     const cp = this.buildClasspath(info, opts.gameDir, opts.versionId)
 
-    // JVM args base
-    args.push(`-Xmx${opts.maxRam}M`, `-Xms${opts.minRam}M`)
+    const maxRam = Math.max(512, Number(opts.maxRam) || 2048)
+    const minRam = Math.min(Math.max(256, Number(opts.minRam) || 512), maxRam)
+    args.push(`-Xmx${maxRam}M`, `-Xms${minRam}M`)
+    if (agentArg) args.push(agentArg)
     args.push(`-Djava.library.path=${nativDir}`)
     args.push('-Dminecraft.launcher.brand=nexus-launcher')
-    args.push('-Dminecraft.launcher.version=1.0.0')
-    // Fix Log4Shell
+    args.push('-Dminecraft.launcher.version=1.0.2')
     args.push('-Dlog4j2.formatMsgNoLookups=true')
 
     if (info.arguments?.jvm) {
       const jvmVars: Record<string, string> = {
         natives_directory: nativDir,
         launcher_name: 'nexus-launcher',
-        launcher_version: '1.0.0',
+        launcher_version: '1.0.2',
         classpath: cp,
       }
-      args.push(...this.resolveArgs(info.arguments.jvm, jvmVars))
+      for (const arg of this.resolveArgs(info.arguments.jvm, jvmVars)) {
+        if (arg.startsWith('-Xmx') || arg.startsWith('-Xms')) continue
+        args.push(arg)
+      }
     } else {
-      // Fallback: formatos viejos antes de 1.13
       args.push('-cp', cp)
     }
 
-    // JVM args personalizados del usuario
     if (opts.jvmArgs?.trim()) {
       args.push(...opts.jvmArgs.trim().split(/\s+/))
     }
 
-    // Logging
     if (info.logging?.client) {
       const logFile = path.join(opts.gameDir, 'logging', info.logging.client.file.id)
       if (fs.existsSync(logFile)) {
@@ -86,10 +137,8 @@ export class LauncherService {
       }
     }
 
-    // Main class
     args.push(info.mainClass)
 
-    // Game args
     const accessToken = opts.profileType === 'microsoft'
       ? (opts.profileData.accessToken ?? '0')
       : '0'
@@ -112,10 +161,7 @@ export class LauncherService {
     if (info.arguments?.game) {
       args.push(...this.resolveArgs(info.arguments.game, gameVars))
     } else if (info.minecraftArguments) {
-      // Pre-1.13
-      args.push(...info.minecraftArguments
-        .split(' ')
-        .map(a => this.replaceVars(a, gameVars)))
+      args.push(...info.minecraftArguments.split(' ').map(a => this.replaceVars(a, gameVars)))
     }
 
     return args
