@@ -2,12 +2,31 @@ import { ipcMain, BrowserWindow } from 'electron'
 import { LauncherService } from '../services/launcher'
 import { DownloaderService } from '../services/downloader'
 import { JavaService } from '../services/java'
+import { JavaRuntimesService } from '../services/javaRuntimes'
 import log from 'electron-log'
+
+function sendJavaProgress(
+  mainWindow: BrowserWindow,
+  msg: string,
+  current?: number,
+  total?: number
+) {
+  mainWindow.webContents.send('download:progress', {
+    phase: 'java',
+    current: current || 0,
+    total: total || 1,
+    currentFile: msg,
+    speed: 0,
+    downloaded: current || 0,
+    totalBytes: total || 0,
+  })
+}
 
 export function setupLauncherHandlers(mainWindow: BrowserWindow) {
   const launcherService = new LauncherService()
   const downloaderService = new DownloaderService()
   const javaService = new JavaService()
+  const runtimes = new JavaRuntimesService()
 
   ipcMain.handle('launcher:launch', async (_event, options: {
     versionId: string
@@ -16,48 +35,28 @@ export function setupLauncherHandlers(mainWindow: BrowserWindow) {
     settings: { gameDir: string; javaPath: string; maxRam: number; minRam: number; jvmArgs: string }
   }) => {
     try {
-      const requiredMajor = javaService.getRequiredJavaVersion(options.versionId)
+      const requiredMajor = javaService.requiredJavaMajor(options.versionId)
       log.info(`[Launcher] Versión Minecraft: ${options.versionId} → requiere Java ${requiredMajor}`)
 
-      // 1. Buscar Java con la versión exacta requerida
-      let javaPath = await javaService.ensureJava(options.versionId, options.settings.javaPath)
-
+      const resolved = await runtimes.resolveForMinecraft(
+        options.versionId,
+        options.settings.javaPath,
+        (msg, current, total) => sendJavaProgress(mainWindow, msg, current, total)
+      )
+      const javaPath = resolved.javaPath
       if (!javaPath) {
-        // No tenemos el Java requerido → descargarlo
-        log.info(`[Launcher] Java ${requiredMajor} no encontrado, descargando...`)
-        mainWindow.webContents.send('download:progress', {
-          phase: 'java',
-          current: 0,
-          total: 100,
-          currentFile: `Java ${requiredMajor} Runtime`,
-          speed: 0,
-          downloaded: 0,
-          totalBytes: 0,
-        })
-
-        javaPath = await javaService.downloadJava(requiredMajor, (p) => {
-          mainWindow.webContents.send('download:progress', p)
-        })
-
-        if (!javaPath) {
-          return { success: false, error: `No se pudo instalar Java ${requiredMajor}. Revisa tu conexión a internet.` }
-        }
-
-        log.info(`[Launcher] Java ${requiredMajor} instalado en: ${javaPath}`)
-      } else {
-        log.info(`[Launcher] Java ${requiredMajor} disponible en: ${javaPath}`)
+        return { success: false, error: `No se pudo instalar Java ${requiredMajor}. Revisa tu conexión a internet.` }
       }
 
+      log.info(`[Launcher] Java ${resolved.major} en: ${javaPath}`)
       options.settings.javaPath = javaPath
 
-      // 2. Descargar archivos de la versión de Minecraft si no están
       await downloaderService.ensureVersion(
         options.versionId,
         options.settings.gameDir,
         (progress) => { mainWindow.webContents.send('download:progress', progress) }
       )
 
-      // 3. Lanzar Minecraft
       await launcherService.launch({
         versionId: options.versionId,
         gameDir: options.settings.gameDir,
@@ -78,7 +77,8 @@ export function setupLauncherHandlers(mainWindow: BrowserWindow) {
 
   ipcMain.handle('java:detect', async (_event, versionId: string) => {
     try {
-      const javaPath = await javaService.detectJava(versionId)
+      const major = javaService.requiredJavaMajor(versionId)
+      const javaPath = await runtimes.findInstalled(major)
       return { success: true, javaPath }
     } catch (err: any) {
       return { success: false, error: err.message }
@@ -87,8 +87,8 @@ export function setupLauncherHandlers(mainWindow: BrowserWindow) {
 
   ipcMain.handle('java:download', async (_event, majorVersion: number) => {
     try {
-      const javaPath = await javaService.downloadJava(majorVersion, (progress) => {
-        mainWindow.webContents.send('download:progress', progress)
+      const javaPath = await runtimes.ensureRuntime(majorVersion, (msg, current, total) => {
+        sendJavaProgress(mainWindow, msg, current, total)
       })
       return { success: true, javaPath }
     } catch (err: any) {
