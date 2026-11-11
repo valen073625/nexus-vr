@@ -12,7 +12,6 @@ const execFileAsync = promisify(execFile)
 
 export type ProgressFn = (msg: string, current?: number, total?: number) => void
 
-/** Majors que el launcher sabe bajar de Adoptium. */
 const KNOWN = [8, 16, 17, 21, 25] as const
 type KnownMajor = (typeof KNOWN)[number]
 
@@ -20,10 +19,6 @@ function isKnown(major: number): major is KnownMajor {
   return (KNOWN as readonly number[]).includes(major)
 }
 
-/**
- * Una carpeta por major en userData/java/<major>.
- * Si ya hay un java.exe de ese major (sistema o carpeta), no se vuelve a bajar.
- */
 export class JavaRuntimesService {
   private java = new JavaService()
   private root: string
@@ -31,6 +26,16 @@ export class JavaRuntimesService {
   constructor() {
     this.root = path.join(app.getPath('userData'), 'java')
     fs.mkdirSync(this.root, { recursive: true })
+  }
+
+  /** Borra solo los JRE que bajo el launcher. No toca el Java del sistema. */
+  deleteDownloaded(): { path: string } {
+    if (fs.existsSync(this.root)) {
+      fs.rmSync(this.root, { recursive: true, force: true })
+    }
+    fs.mkdirSync(this.root, { recursive: true })
+    log.info('Javas descargados eliminados:', this.root)
+    return { path: this.root }
   }
 
   private runtimeDir(major: number): string {
@@ -94,15 +99,7 @@ export class JavaRuntimesService {
         'C:\\Program Files',
         'C:\\Program Files (x86)',
       ].filter(Boolean) as string[]
-      const vendors = [
-        'Java',
-        'Eclipse Adoptium',
-        'Microsoft',
-        'Amazon Corretto',
-        'BellSoft',
-        'Zulu',
-        'Semeru',
-      ]
+      const vendors = ['Java', 'Eclipse Adoptium', 'Microsoft', 'Amazon Corretto', 'BellSoft', 'Zulu', 'Semeru']
       for (const base of bases) {
         for (const v of vendors) {
           const root = path.join(base, v)
@@ -118,7 +115,6 @@ export class JavaRuntimesService {
       }
     }
 
-    // Runtimes que el propio launcher ya dejo en disco
     try {
       for (const name of fs.readdirSync(this.root)) {
         const bin = this.findJavaBinary(path.join(this.root, name))
@@ -135,10 +131,7 @@ export class JavaRuntimesService {
     for (const c of await this.collectCandidates()) {
       try {
         const ver = await this.java.getJavaVersion(c)
-        if (this.java.parseMajor(ver) === major) {
-          log.info(`Java ${major} ya instalado:`, c, ver)
-          return c
-        }
+        if (this.java.parseMajor(ver) === major) return c
       } catch {
         // ignore
       }
@@ -149,7 +142,6 @@ export class JavaRuntimesService {
   private adoptiumUrl(major: KnownMajor): string {
     const os = process.platform === 'win32' ? 'windows' : process.platform === 'darwin' ? 'mac' : 'linux'
     const arch = process.arch === 'arm64' ? 'aarch64' : 'x64'
-    // Java 16 ya no esta en /latest; se fija el ultimo build publicado.
     if (major === 16) {
       return `https://api.adoptium.net/v3/binary/version/jdk-16.0.2+7/${os}/${arch}/jre/hotspot/normal/eclipse?project=jdk`
     }
@@ -162,32 +154,20 @@ export class JavaRuntimesService {
       onProgress?.(`Java ${major} ya esta instalado, no se vuelve a bajar`)
       return existing
     }
-
     if (!isKnown(major)) {
-      throw new Error(
-        `Esta version pide Java ${major} y el launcher no tiene un instalador para ese numero.`
-      )
+      throw new Error(`Esta version pide Java ${major} y el launcher no tiene un instalador para ese numero.`)
     }
 
     onProgress?.(`Descargando Java ${major} (solo esta vez)...`, 0, 1)
     const destDir = this.runtimeDir(major)
     const tmpZip = path.join(this.root, `java-${major}-download.zip`)
-
     if (fs.existsSync(destDir)) fs.rmSync(destDir, { recursive: true, force: true })
     fs.mkdirSync(destDir, { recursive: true })
 
     const url = this.adoptiumUrl(major)
-    log.info('Downloading Java', major, url)
-
-    const response = await axios.get(url, {
-      responseType: 'stream',
-      timeout: 600000,
-      maxRedirects: 10,
-    })
-
+    const response = await axios.get(url, { responseType: 'stream', timeout: 600000, maxRedirects: 10 })
     const total = Number(response.headers['content-length'] || 0)
     let downloaded = 0
-
     await new Promise<void>((resolve, reject) => {
       const writer = fs.createWriteStream(tmpZip)
       response.data.on('data', (chunk: Buffer) => {
@@ -202,20 +182,14 @@ export class JavaRuntimesService {
 
     onProgress?.(`Extrayendo Java ${major}...`)
     await extract(tmpZip, { dir: destDir })
-    try {
-      fs.unlinkSync(tmpZip)
-    } catch {
-      // ignore
-    }
+    try { fs.unlinkSync(tmpZip) } catch { /* ignore */ }
 
     const bin = this.findJavaBinary(destDir)
     if (!bin) throw new Error(`No se encontro java.exe tras instalar Java ${major}`)
-
     const ver = await this.java.getJavaVersion(bin)
     if (this.java.parseMajor(ver) !== major) {
       throw new Error(`Se descargo Java ${ver}, pero se necesitaba Java ${major}`)
     }
-    log.info('Installed Java', major, bin, ver)
     onProgress?.(`Java ${major} listo (${ver})`)
     return bin
   }
@@ -227,7 +201,6 @@ export class JavaRuntimesService {
     manifestMajor?: number
   ): Promise<{ javaPath: string; major: number }> {
     const required = this.java.requiredJavaMajor(versionId, manifestMajor)
-
     if (configuredPath && fs.existsSync(configuredPath)) {
       try {
         const ver = await this.java.getJavaVersion(configuredPath)
@@ -236,12 +209,10 @@ export class JavaRuntimesService {
           onProgress?.(`Usando el Java ${major} que configuraste`)
           return { javaPath: configuredPath, major }
         }
-        log.warn('Configured Java no coincide con el que pide el juego:', ver, 'required', required)
       } catch {
         // ignore
       }
     }
-
     const javaPath = await this.ensureRuntime(required, onProgress)
     const ver = await this.java.getJavaVersion(javaPath)
     return { javaPath, major: this.java.parseMajor(ver) }
