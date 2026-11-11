@@ -31,7 +31,7 @@ export interface AppSettings {
   closeOnLaunch: boolean
 }
 
-export type Screen = 'login' | 'main' | 'download' | 'settings'
+export type Screen = 'login' | 'main' | 'download' | 'settings' | 'skins'
 
 interface StoreState {
   activeProfile: Profile | null

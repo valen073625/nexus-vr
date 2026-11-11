@@ -1,24 +1,14 @@
 import { ipcMain, BrowserWindow } from 'electron'
-import { LauncherService } from '../services/launcher'
+import { LauncherService, type OptimizeOptions } from '../services/launcher'
 import { DownloaderService } from '../services/downloader'
 import { JavaService } from '../services/java'
 import { JavaRuntimesService } from '../services/javaRuntimes'
 import log from 'electron-log'
 
-function sendJavaProgress(
-  mainWindow: BrowserWindow,
-  msg: string,
-  current?: number,
-  total?: number
-) {
+function sendJavaProgress(mainWindow: BrowserWindow, msg: string, current?: number, total?: number) {
   mainWindow.webContents.send('download:progress', {
-    phase: 'java',
-    current: current || 0,
-    total: total || 1,
-    currentFile: msg,
-    speed: 0,
-    downloaded: current || 0,
-    totalBytes: total || 0,
+    phase: 'java', current: current || 0, total: total || 1, currentFile: msg,
+    speed: 0, downloaded: current || 0, totalBytes: total || 0,
   })
 }
 
@@ -33,23 +23,19 @@ export function setupLauncherHandlers(mainWindow: BrowserWindow) {
     profileType: 'microsoft' | 'offline'
     profileData: { username: string; uuid: string; accessToken?: string }
     settings: { gameDir: string; javaPath: string; maxRam: number; minRam: number; jvmArgs: string }
+    optimize?: OptimizeOptions
   }) => {
     try {
       const requiredMajor = javaService.requiredJavaMajor(options.versionId)
-      log.info(`[Launcher] Versión Minecraft: ${options.versionId} → requiere Java ${requiredMajor}`)
-
       const resolved = await runtimes.resolveForMinecraft(
         options.versionId,
         options.settings.javaPath,
         (msg, current, total) => sendJavaProgress(mainWindow, msg, current, total)
       )
-      const javaPath = resolved.javaPath
-      if (!javaPath) {
-        return { success: false, error: `No se pudo instalar Java ${requiredMajor}. Revisa tu conexión a internet.` }
+      if (!resolved.javaPath) {
+        return { success: false, error: `No se pudo instalar Java ${requiredMajor}.` }
       }
-
-      log.info(`[Launcher] Java ${resolved.major} en: ${javaPath}`)
-      options.settings.javaPath = javaPath
+      options.settings.javaPath = resolved.javaPath
 
       await downloaderService.ensureVersion(
         options.versionId,
@@ -61,13 +47,13 @@ export function setupLauncherHandlers(mainWindow: BrowserWindow) {
         versionId: options.versionId,
         gameDir: options.settings.gameDir,
         javaPath: options.settings.javaPath,
-        maxRam: options.settings.maxRam,
-        minRam: options.settings.minRam,
+        maxRam: Number(options.settings.maxRam),
+        minRam: Number(options.settings.minRam),
         jvmArgs: options.settings.jvmArgs,
         profileType: options.profileType,
         profileData: options.profileData,
+        optimize: options.optimize,
       })
-
       return { success: true }
     } catch (err: any) {
       log.error('[Launcher] Error al lanzar:', err)
@@ -77,7 +63,7 @@ export function setupLauncherHandlers(mainWindow: BrowserWindow) {
 
   ipcMain.handle('java:detect', async (_event, versionId: string) => {
     try {
-      const major = javaService.requiredJavaMajor(versionId)
+      const major = javaService.requiredJavaMajor(versionId || '1.20.1')
       const javaPath = await runtimes.findInstalled(major)
       return { success: true, javaPath }
     } catch (err: any) {

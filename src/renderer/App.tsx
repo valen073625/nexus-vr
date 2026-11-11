@@ -1,14 +1,15 @@
 import React, { useEffect, useState } from 'react'
-import { LoginScreen }    from './components/screens/LoginScreen'
-import { MainScreen }     from './components/screens/MainScreen'
+import { LoginScreen } from './components/screens/LoginScreen'
+import { MainScreen } from './components/screens/MainScreen'
 import { DownloadScreen } from './components/screens/DownloadScreen'
 import { SettingsScreen } from './components/screens/SettingsScreen'
-import { TitleBar }       from './components/ui/TitleBar'
-import { Sidebar }        from './components/ui/Sidebar'
-import { useStore }       from './store/useStore'
+import { SkinsScreen } from './components/screens/SkinsScreen'
+import { TitleBar } from './components/ui/TitleBar'
+import { Sidebar } from './components/ui/Sidebar'
+import { useStore } from './store/useStore'
 
 export default function App() {
-  const { activeProfile, setActiveProfile, screen, setScreen } = useStore()
+  const { setActiveProfile, screen, setScreen } = useStore()
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
@@ -28,7 +29,7 @@ export default function App() {
           setLoading(false)
           return
         }
-      } catch { /* sin sesión */ }
+      } catch { /* sin sesion */ }
       setScreen('login')
       setLoading(false)
     }
@@ -53,9 +54,10 @@ export default function App() {
         <div className="app-body">
           <Sidebar />
           <main className="app-content">
-            {screen === 'main'     && <MainScreen />}
+            {screen === 'main' && <MainScreen />}
             {screen === 'download' && <DownloadScreen />}
             {screen === 'settings' && <SettingsScreen />}
+            {screen === 'skins' && <SkinsScreen />}
           </main>
         </div>
       )}
