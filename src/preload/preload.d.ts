@@ -36,6 +36,7 @@ declare global {
       java: {
         detect: (versionId: string) => Promise<{ success: boolean; javaPath?: string; error?: string }>
         download: (majorVersion: number) => Promise<{ success: boolean; javaPath?: string; error?: string }>
+        deleteDownloaded: () => Promise<{ success: boolean; path?: string; error?: string }>
       }
       skins: {
         list: () => Promise<{ activeId: string | null; skins: { id: string; name: string }[] }>
