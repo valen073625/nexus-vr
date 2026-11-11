@@ -1,121 +1,85 @@
-import { app, BrowserWindow, ipcMain } from 'electron'
+import { app, BrowserWindow, ipcMain, shell, safeStorage } from 'electron'
 import path from 'path'
 import log from 'electron-log'
+import { setupAuthHandlers } from './ipc/authHandlers'
+import { setupLauncherHandlers } from './ipc/launcherHandlers'
+import { setupVersionHandlers } from './ipc/versionHandlers'
 import { setupSettingsHandlers } from './ipc/settingsHandlers'
 import { setupProfileHandlers } from './ipc/profileHandlers'
-import { setupVersionHandlers } from './ipc/versionHandlers'
-import { setupLaunchHandlers } from './ipc/launchHandlers'
-import { setupSkinHandlers } from './ipc/skinHandlers'
-import { launchService } from './services/launch'
 
 log.initialize()
-log.info('Nexus Launcher starting...')
+log.transports.file.level = 'info'
 
 let mainWindow: BrowserWindow | null = null
-let gameSessionActive = false
 
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1100,
-    height: 720,
+    height: 700,
     minWidth: 900,
     minHeight: 600,
-    backgroundColor: '#0f0f12',
-    show: false,
+    frame: false,
+    titleBarStyle: 'hidden',
+    backgroundColor: '#0f0f0f',
     webPreferences: {
       preload: path.join(__dirname, '../preload/preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: true,
+      sandbox: false, // sandbox:true bloquea safeStorage en algunos sistemas
+      webSecurity: true,
     },
   })
 
-  if (!app.isPackaged) {
+  if (process.env.NODE_ENV === 'development') {
     mainWindow.loadURL('http://localhost:5173')
-    mainWindow.webContents.openDevTools({ mode: 'detach' })
+    mainWindow.webContents.openDevTools()
   } else {
     mainWindow.loadFile(path.join(__dirname, '../renderer/index.html'))
   }
 
-  mainWindow.once('ready-to-show', () => {
-    if (!gameSessionActive) {
-      mainWindow?.show()
-    }
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    shell.openExternal(url)
+    return { action: 'deny' }
   })
 
-  mainWindow.on('closed', () => {
-    mainWindow = null
-  })
-}
-
-function showLauncher() {
-  gameSessionActive = false
-  if (!mainWindow || mainWindow.isDestroyed()) {
-    createWindow()
-    return
-  }
-  if (mainWindow.isMinimized()) mainWindow.restore()
-  mainWindow.show()
-  mainWindow.focus()
-}
-
-function hideLauncher() {
-  gameSessionActive = true
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.hide()
-  }
+  mainWindow.on('closed', () => { mainWindow = null })
 }
 
 app.whenReady().then(() => {
+  createWindow()
+  setupAuthHandlers()
+  setupLauncherHandlers(mainWindow!)
+  setupVersionHandlers()
   setupSettingsHandlers()
   setupProfileHandlers()
-  setupVersionHandlers()
-  setupLaunchHandlers()
-  setupSkinHandlers()
-
-  launchService.setOnGameExit((info) => {
-    log.info('Game session ended', info)
-    showLauncher()
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send('launch:game-exited', info)
-    }
-  })
-
-  ipcMain.on('launch:hide-window', () => {
-    // Retrasar ocultar: si crashea en <3s el usuario sigue viendo el launcher
-    setTimeout(() => {
-      if (launchService.isGameRunning()) {
-        hideLauncher()
-      }
-    }, 3500)
-  })
-
-  createWindow()
 
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
-      createWindow()
-    } else if (!gameSessionActive) {
-      showLauncher()
-    }
+    if (BrowserWindow.getAllWindows().length === 0) createWindow()
   })
 })
 
 app.on('window-all-closed', () => {
-  if (gameSessionActive || launchService.isGameRunning()) {
-    return
-  }
-  if (process.platform !== 'darwin') {
-    app.quit()
-  }
+  if (process.platform !== 'darwin') app.quit()
 })
 
-const gotTheLock = app.requestSingleInstanceLock()
-if (!gotTheLock) {
-  app.quit()
-} else {
-  app.on('second-instance', () => {
-    if (gameSessionActive) return
-    showLauncher()
-  })
-}
+ipcMain.handle('window:minimize', () => mainWindow?.minimize())
+ipcMain.handle('window:maximize', () => {
+  if (mainWindow?.isMaximized()) mainWindow.unmaximize()
+  else mainWindow?.maximize()
+})
+ipcMain.handle('window:close', () => mainWindow?.close())
+ipcMain.handle('window:isMaximized', () => mainWindow?.isMaximized() ?? false)
+
+ipcMain.handle('storage:encrypt', (_event, data: string): string | null => {
+  if (!safeStorage.isEncryptionAvailable()) return null
+  return safeStorage.encryptString(data).toString('base64')
+})
+
+ipcMain.handle('storage:decrypt', (_event, data: string): string | null => {
+  if (!safeStorage.isEncryptionAvailable()) return null
+  try {
+    return safeStorage.decryptString(Buffer.from(data, 'base64'))
+  } catch { return null }
+})
+
+export { mainWindow }

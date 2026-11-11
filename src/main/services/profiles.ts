@@ -1,117 +1,49 @@
 import { app } from 'electron'
 import path from 'path'
 import fs from 'fs'
-import { v4 as uuidv4 } from 'uuid'
 
 export interface Profile {
   id: string
-  name: string
-  version: string
-  javaPath?: string
-  gameDir?: string
-  jvmArgs?: string
-  createdAt: string
-  lastUsed?: string
+  type: 'microsoft' | 'offline'
+  username: string
+  uuid: string
+  accessToken?: string
+  expiresAt?: number
 }
 
+interface Store { activeId: string | null; profiles: Profile[] }
+
 export class ProfilesService {
-  private profilesPath: string
-  private activeIdPath: string
+  private p = path.join(app.getPath('userData'), 'profiles.json')
 
-  constructor() {
-    const userData = app.getPath('userData')
-    this.profilesPath = path.join(userData, 'profiles.json')
-    this.activeIdPath = path.join(userData, 'active-profile.json')
+  private load(): Store {
+    if (!fs.existsSync(this.p)) return { activeId: null, profiles: [] }
+    try { return JSON.parse(fs.readFileSync(this.p, 'utf-8')) } catch { return { activeId: null, profiles: [] } }
   }
+  private save(s: Store) { fs.writeFileSync(this.p, JSON.stringify(s, null, 2), 'utf-8') }
 
-  private readProfiles(): Profile[] {
-    if (!fs.existsSync(this.profilesPath)) {
-      // Perfil por defecto
-      const defaultProfile: Profile = {
-        id: uuidv4(),
-        name: 'Default',
-        version: 'latest-release',
-        createdAt: new Date().toISOString(),
-      }
-      this.writeProfiles([defaultProfile])
-      this.setActiveProfile(defaultProfile.id)
-      return [defaultProfile]
-    }
-    try {
-      return JSON.parse(fs.readFileSync(this.profilesPath, 'utf-8')) as Profile[]
-    } catch {
-      return []
-    }
+  getAllProfiles() { return this.load().profiles }
+  getActiveProfile() {
+    const s = this.load()
+    return s.activeId ? (s.profiles.find(p => p.id === s.activeId) ?? null) : null
   }
-
-  private writeProfiles(profiles: Profile[]): void {
-    fs.writeFileSync(this.profilesPath, JSON.stringify(profiles, null, 2), 'utf-8')
+  upsertProfile(profile: Profile) {
+    const s = this.load()
+    const idx = s.profiles.findIndex(p => p.id === profile.id)
+    if (idx >= 0) s.profiles[idx] = profile; else s.profiles.push(profile)
+    if (!s.activeId) s.activeId = profile.id
+    this.save(s)
   }
-
-  getAllProfiles(): Profile[] {
-    return this.readProfiles()
+  setActiveProfile(id: string) {
+    const s = this.load()
+    if (!s.profiles.some(p => p.id === id)) throw new Error(`Perfil ${id} no encontrado.`)
+    s.activeId = id
+    this.save(s)
   }
-
-  getActiveProfile(): Profile | null {
-    const profiles = this.readProfiles()
-    if (profiles.length === 0) return null
-
-    let activeId: string | null = null
-    if (fs.existsSync(this.activeIdPath)) {
-      try {
-        const data = JSON.parse(fs.readFileSync(this.activeIdPath, 'utf-8'))
-        activeId = data.id
-      } catch {
-        // ignore
-      }
-    }
-
-    if (activeId) {
-      const found = profiles.find((p) => p.id === activeId)
-      if (found) return found
-    }
-
-    return profiles[0]
-  }
-
-  setActiveProfile(id: string): void {
-    const profiles = this.readProfiles()
-    const profile = profiles.find((p) => p.id === id)
-    if (!profile) {
-      throw new Error(`Profile not found: ${id}`)
-    }
-    fs.writeFileSync(this.activeIdPath, JSON.stringify({ id }, null, 2), 'utf-8')
-  }
-
-  deleteProfile(id: string): void {
-    let profiles = this.readProfiles()
-    const before = profiles.length
-    profiles = profiles.filter((p) => p.id !== id)
-    if (profiles.length === before) {
-      throw new Error(`Profile not found: ${id}`)
-    }
-    if (profiles.length === 0) {
-      throw new Error('Cannot delete the last profile')
-    }
-    this.writeProfiles(profiles)
-
-    // Si el eliminado era el activo, activar el primero
-    const active = this.getActiveProfile()
-    if (!active || active.id === id) {
-      this.setActiveProfile(profiles[0].id)
-    }
-  }
-
-  createProfile(name: string, version: string): Profile {
-    const profiles = this.readProfiles()
-    const profile: Profile = {
-      id: uuidv4(),
-      name,
-      version,
-      createdAt: new Date().toISOString(),
-    }
-    profiles.push(profile)
-    this.writeProfiles(profiles)
-    return profile
+  deleteProfile(id: string) {
+    const s = this.load()
+    s.profiles = s.profiles.filter(p => p.id !== id)
+    if (s.activeId === id) s.activeId = s.profiles[0]?.id ?? null
+    this.save(s)
   }
 }

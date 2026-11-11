@@ -52,10 +52,23 @@
     "win": {
       "target": [
         {
+          "target": "nsis",
+          "arch": ["x64"]
+        },
+        {
           "target": "portable",
           "arch": ["x64"]
         }
       ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Nexus Launcher",
+      "artifactName": "Nexus-Launcher-${version}-Setup.exe",
+      "deleteAppDataOnUninstall": false
     },
     "portable": {
       "artifactName": "Nexus-Launcher-${version}-portable.exe"

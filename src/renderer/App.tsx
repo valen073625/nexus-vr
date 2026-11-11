@@ -1,318 +1,64 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react'
-import SkinPreview from './components/SkinPreview'
-
-type ProgressInfo = {
-  stage: string
-  current: number
-  total: number
-  message: string
-}
-
-type VersionItem = {
-  id: string
-  type: string
-  releaseTime: string
-}
-
-type SkinInfo = {
-  id: string
-  name: string
-  fileName: string
-  createdAt: string
-}
+import React, { useEffect, useState } from 'react'
+import { LoginScreen }    from './components/screens/LoginScreen'
+import { MainScreen }     from './components/screens/MainScreen'
+import { DownloadScreen } from './components/screens/DownloadScreen'
+import { SettingsScreen } from './components/screens/SettingsScreen'
+import { TitleBar }       from './components/ui/TitleBar'
+import { Sidebar }        from './components/ui/Sidebar'
+import { useStore }       from './store/useStore'
 
 export default function App() {
-  const [username, setUsername] = useState('Player')
-  const [versionId, setVersionId] = useState('1.19.1')
-  const [versions, setVersions] = useState<VersionItem[]>([])
-  const [latest, setLatest] = useState<string>('')
-  const [versionsLoading, setVersionsLoading] = useState(true)
-  const [versionsError, setVersionsError] = useState<string | null>(null)
-  const [status, setStatus] = useState('Listo')
-  const [progress, setProgress] = useState<ProgressInfo | null>(null)
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [crashLog, setCrashLog] = useState<string | null>(null)
-
-  const [skins, setSkins] = useState<SkinInfo[]>([])
-  const [activeSkinId, setActiveSkinId] = useState<string | null>(null)
-  const [skinDataUrl, setSkinDataUrl] = useState<string | null>(null)
-  const [skinBusy, setSkinBusy] = useState(false)
-  const [skinMsg, setSkinMsg] = useState<string | null>(null)
-
-  const refreshSkins = useCallback(async () => {
-    const list = await window.nexus.listSkins()
-    setSkins(list.skins || [])
-    setActiveSkinId(list.activeId || null)
-    if (list.activeId) {
-      const url = await window.nexus.getSkinDataUrl(list.activeId)
-      setSkinDataUrl(url)
-    } else {
-      setSkinDataUrl(null)
-    }
-  }, [])
+  const { activeProfile, setActiveProfile, screen, setScreen } = useStore()
+  const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    const unsubProgress = window.nexus.onLaunchProgress((info) => {
-      setProgress(info)
-      setStatus(info.message)
-    })
-    const unsubExit = window.nexus.onGameExited((info) => {
-      setBusy(false)
-      setProgress(null)
-      if (info.quickCrash) {
-        setStatus('Minecraft se cerro al instante')
-        setError(info.message || 'Crash al iniciar. Mira el log abajo.')
-        setCrashLog(info.logTail || null)
-      } else {
-        setStatus('Minecraft cerrado - launcher listo')
-        setError(null)
-        setCrashLog(null)
-      }
-    })
-    return () => {
-      unsubProgress()
-      unsubExit()
-    }
-  }, [])
-
-  useEffect(() => {
-    let cancelled = false
-    ;(async () => {
-      setVersionsLoading(true)
-      setVersionsError(null)
+    async function restore() {
       try {
-        const [playable, settings] = await Promise.all([
-          window.nexus.getPlayableVersions(),
-          window.nexus.getSettings(),
-        ])
-        if (cancelled) return
-
-        if (!playable.success) {
-          setVersionsError(playable.error || 'No se pudieron cargar versiones')
+        const ms = await window.nexus.auth.microsoft.getCurrent()
+        if (ms.success && ms.profile) {
+          setActiveProfile(ms.profile)
+          setScreen('main')
+          setLoading(false)
           return
         }
-
-        setVersions(playable.versions || [])
-        setLatest(playable.latest || '')
-
-        const preferred =
-          settings?.selectedVersion ||
-          playable.latest ||
-          playable.versions?.[0]?.id ||
-          '1.19.1'
-
-        const exists = (playable.versions || []).some((v: VersionItem) => v.id === preferred)
-        setVersionId(exists ? preferred : playable.versions?.[0]?.id || '1.19.1')
-      } catch (e: any) {
-        if (!cancelled) setVersionsError(e?.message || String(e))
-      } finally {
-        if (!cancelled) setVersionsLoading(false)
-      }
-    })()
-    refreshSkins().catch(() => {})
-    return () => {
-      cancelled = true
-    }
-  }, [refreshSkins])
-
-  const percent =
-    progress && progress.total > 0
-      ? Math.min(100, Math.round((progress.current / progress.total) * 100))
-      : null
-
-  const versionLabel = useMemo(() => versionId || '-', [versionId])
-
-  async function handleLaunch() {
-    if (!versionId) {
-      setError('Selecciona una version')
-      return
-    }
-    setBusy(true)
-    setError(null)
-    setCrashLog(null)
-    setStatus('Preparando...')
-    try {
-      const result = await window.nexus.launchGame({
-        versionId,
-        username: username.trim() || 'Player',
-      })
-      if (result.success) {
-        setStatus('Minecraft iniciado')
-        if (result.javaWarning) {
-          setError(result.javaWarning)
+        const off = await window.nexus.auth.offline.getAll()
+        if (off.success && off.profiles?.length) {
+          setActiveProfile(off.profiles[0])
+          setScreen('main')
+          setLoading(false)
+          return
         }
-        setProgress({ stage: 'done', current: 1, total: 1, message: 'Juego en ejecucion' })
-        window.nexus.hideLauncherWindow()
-      } else {
-        setError(result.error || 'Error desconocido')
-        setStatus('Error')
-        setBusy(false)
-      }
-    } catch (e: any) {
-      setError(e?.message || String(e))
-      setStatus('Error')
-      setBusy(false)
+      } catch { /* sin sesión */ }
+      setScreen('login')
+      setLoading(false)
     }
-  }
+    restore()
+  }, [])
 
-  async function handleImportSkin() {
-    setSkinBusy(true)
-    setSkinMsg(null)
-    try {
-      const result = await window.nexus.importSkin()
-      if (result.canceled) return
-      if (!result.success) {
-        setSkinMsg(result.error || 'No se pudo importar')
-        return
-      }
-      setSkinMsg('Skin "' + result.skin.name + '" agregada (se aplica al jugar)')
-      await refreshSkins()
-    } catch (e: any) {
-      setSkinMsg(e?.message || String(e))
-    } finally {
-      setSkinBusy(false)
-    }
-  }
-
-  async function handleSelectSkin(id: string) {
-    await window.nexus.setActiveSkin(id)
-    await refreshSkins()
-  }
-
-  async function handleDeleteSkin(id: string) {
-    await window.nexus.deleteSkin(id)
-    await refreshSkins()
+  if (loading) {
+    return (
+      <div className="app-loading">
+        <div className="loading-spinner" />
+        <span>Cargando Nexus Launcher...</span>
+      </div>
+    )
   }
 
   return (
     <div className="app">
-      <header className="header">
-        <h1>Nexus Launcher</h1>
-        <p className="subtitle">Minecraft: Java Edition</p>
-      </header>
-
-      <main className="main main-skins">
-        <section className="card skin-card">
-          <h2>Skin del jugador</h2>
-
-          <div className="skin-layout">
-            <div className="skin-stage">
-              <SkinPreview
-                dataUrl={skinDataUrl}
-                username={username.trim() || 'Player'}
-                size={180}
-              />
-            </div>
-
-            <div className="skin-actions">
-              <p className="hint skin-hint">
-                PNG 64x64. La skin activa se inyecta en el juego (offline) al pulsar Jugar.
-              </p>
-              <button
-                className="secondary-btn"
-                onClick={handleImportSkin}
-                disabled={skinBusy || busy}
-              >
-                {skinBusy ? 'Importando...' : 'Agregar imagen de la skin'}
-              </button>
-              {skinMsg && <div className="ok">{skinMsg}</div>}
-
-              {skins.length > 0 && (
-                <div className="skin-list">
-                  <div className="skin-list-title">Skins guardadas</div>
-                  {skins.map((s) => (
-                    <div
-                      key={s.id}
-                      className={'skin-item' + (s.id === activeSkinId ? ' active' : '')}
-                    >
-                      <button
-                        type="button"
-                        className="skin-item-name"
-                        onClick={() => handleSelectSkin(s.id)}
-                        disabled={busy}
-                      >
-                        {s.name}
-                        {s.id === activeSkinId ? ' *' : ''}
-                      </button>
-                      <button
-                        type="button"
-                        className="skin-item-del"
-                        onClick={() => handleDeleteSkin(s.id)}
-                        disabled={busy}
-                        title="Eliminar"
-                      >
-                        x
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
-        </section>
-
-        <section className="card launch-card">
-          <h2>Jugar</h2>
-
-          <label className="field">
-            <span>Usuario (offline)</span>
-            <input
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              maxLength={16}
-              disabled={busy}
-              placeholder="Player"
-            />
-          </label>
-
-          <label className="field">
-            <span>{'Version' + (latest ? ' (ultima: ' + latest + ')' : '')}</span>
-            {versionsLoading ? (
-              <div className="hint">Cargando versiones...</div>
-            ) : versionsError ? (
-              <div className="error">{versionsError}</div>
-            ) : (
-              <select
-                value={versionId}
-                onChange={(e) => setVersionId(e.target.value)}
-                disabled={busy || versions.length === 0}
-              >
-                {versions.map((v) => (
-                  <option key={v.id} value={v.id}>
-                    {v.id + (v.id === latest ? ' - ultima' : '')}
-                  </option>
-                ))}
-              </select>
-            )}
-          </label>
-
-          <p className="hint">
-            Java <strong>17</strong> y <strong>21</strong> se usan del sistema si ya los tienes;
-            si no, el launcher los descarga solo (una vez).
-          </p>
-
-          <button className="play-btn" onClick={handleLaunch} disabled={busy || versionsLoading}>
-            {busy ? 'Trabajando...' : 'Jugar ' + versionLabel}
-          </button>
-
-          <div className="status-block">
-            <div className="status-line">{status}</div>
-            {percent !== null && (
-              <div className="progress">
-                <div className="progress-bar" style={{ width: percent + '%' }} />
-              </div>
-            )}
-            {progress && (
-              <div className="progress-meta">
-                {progress.stage} {percent !== null ? percent + '%' : ''}
-              </div>
-            )}
-            {error && <div className="error">{error}</div>}
-            {crashLog && <pre className="crash-log">{crashLog}</pre>}
-          </div>
-        </section>
-      </main>
+      <TitleBar />
+      {screen === 'login' ? (
+        <LoginScreen />
+      ) : (
+        <div className="app-body">
+          <Sidebar />
+          <main className="app-content">
+            {screen === 'main'     && <MainScreen />}
+            {screen === 'download' && <DownloadScreen />}
+            {screen === 'settings' && <SettingsScreen />}
+          </main>
+        </div>
+      )}
     </div>
   )
 }

@@ -11,7 +11,7 @@ on:
 
 jobs:
   build:
-    name: Build Nexus Launcher (Windows x64 Portable)
+    name: Build Nexus Launcher (Windows x64)
     runs-on: windows-latest
 
     steps:
@@ -22,39 +22,43 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
+          cache: 'npm'
 
       - name: Instalar dependencias
-        run: npm install
+        run: npm ci
 
-      - name: Compilar TypeScript (main process)
-        run: npm run build:main
+      - name: Compilar TypeScript + React
+        run: npm run build
 
-      - name: Compilar React (renderer)
-        run: npm run build:renderer
-
-      - name: Compilar preload
-        run: npx tsc -p tsconfig.main.json
-
-      - name: Generar ejecutable portable .exe
-        run: npx electron-builder --win portable --x64
+      - name: Generar instalador y portable .exe
+        run: npx electron-builder --win --x64
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Reemplaza con tu Client ID de Microsoft Entra:
           MS_CLIENT_ID: ${{ secrets.MS_CLIENT_ID }}
 
-      - name: Subir artifact
+      - name: Subir instalador (Setup.exe)
         uses: actions/upload-artifact@v4
         with:
-          name: Nexus-Launcher-Windows
-          path: release/*.exe
+          name: Nexus-Launcher-Setup-Windows
+          path: release/*Setup*.exe
           retention-days: 30
           if-no-files-found: error
 
-      - name: Crear Release (solo en tags)
+      - name: Subir portable (.exe sin instalador)
+        uses: actions/upload-artifact@v4
+        with:
+          name: Nexus-Launcher-Portable-Windows
+          path: release/*portable*.exe
+          retention-days: 30
+          if-no-files-found: warn
+
+      - name: Crear Release con ambos archivos (solo en tags)
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: release/*.exe
+          files: |
+            release/*Setup*.exe
+            release/*portable*.exe
           generate_release_notes: true
           name: "Nexus Launcher ${{ github.ref_name }}"
         env:

@@ -1,56 +1,59 @@
 import { contextBridge, ipcRenderer } from 'electron'
 
 const api = {
-  getSettings: () => ipcRenderer.invoke('settings:get'),
-  saveSettings: (settings: unknown) => ipcRenderer.invoke('settings:save', settings),
-  selectDir: () => ipcRenderer.invoke('settings:selectDir'),
-  selectJava: () => ipcRenderer.invoke('settings:selectJava'),
-  getDefaultDir: () => ipcRenderer.invoke('settings:getDefaultDir'),
-
-  getAllProfiles: () => ipcRenderer.invoke('profiles:getAll'),
-  getActiveProfile: () => ipcRenderer.invoke('profiles:getActive'),
-  setActiveProfile: (id: string) => ipcRenderer.invoke('profiles:setActive', id),
-  deleteProfile: (id: string) => ipcRenderer.invoke('profiles:delete', id),
-
-  getVersionManifest: () => ipcRenderer.invoke('versions:getManifest'),
-  getPlayableVersions: () => ipcRenderer.invoke('versions:getPlayable'),
-  getVersionInfo: (versionId: string) => ipcRenderer.invoke('versions:getVersionInfo', versionId),
-
-  launchGame: (payload: { versionId: string; username?: string }) =>
-    ipcRenderer.invoke('launch:game', payload),
-  isGameRunning: () => ipcRenderer.invoke('launch:isRunning'),
-  hideLauncherWindow: () => ipcRenderer.send('launch:hide-window'),
-
-  listSkins: () => ipcRenderer.invoke('skins:list'),
-  getActiveSkin: () => ipcRenderer.invoke('skins:getActive'),
-  setActiveSkin: (id: string | null) => ipcRenderer.invoke('skins:setActive', id),
-  importSkin: () => ipcRenderer.invoke('skins:import'),
-  deleteSkin: (id: string) => ipcRenderer.invoke('skins:delete', id),
-  getSkinDataUrl: (id: string) => ipcRenderer.invoke('skins:getDataUrl', id),
-  getActiveSkinDataUrl: () => ipcRenderer.invoke('skins:getActiveDataUrl'),
-
-  onLaunchProgress: (
-    callback: (info: { stage: string; current: number; total: number; message: string }) => void
-  ) => {
-    const listener = (_event: Electron.IpcRendererEvent, info: any) => callback(info)
-    ipcRenderer.on('launch:progress', listener)
-    return () => ipcRenderer.removeListener('launch:progress', listener)
+  window: {
+    minimize:    () => ipcRenderer.invoke('window:minimize'),
+    maximize:    () => ipcRenderer.invoke('window:maximize'),
+    close:       () => ipcRenderer.invoke('window:close'),
+    isMaximized: () => ipcRenderer.invoke('window:isMaximized'),
   },
-
-  onGameExited: (
-    callback: (info: {
-      code: number | null
-      quickCrash?: boolean
-      logTail?: string
-      message?: string
-    }) => void
-  ) => {
-    const listener = (_event: Electron.IpcRendererEvent, info: any) => callback(info)
-    ipcRenderer.on('launch:game-exited', listener)
-    return () => ipcRenderer.removeListener('launch:game-exited', listener)
+  auth: {
+    microsoft: {
+      login:      () => ipcRenderer.invoke('auth:microsoft:login'),
+      logout:     () => ipcRenderer.invoke('auth:microsoft:logout'),
+      refresh:    () => ipcRenderer.invoke('auth:microsoft:refresh'),
+      getCurrent: () => ipcRenderer.invoke('auth:microsoft:getCurrent'),
+    },
+    offline: {
+      create: (username: string) => ipcRenderer.invoke('auth:offline:create', username),
+      getAll: ()                 => ipcRenderer.invoke('auth:offline:getAll'),
+      delete: (id: string)       => ipcRenderer.invoke('auth:offline:delete', id),
+    },
+  },
+  profiles: {
+    getAll:    () => ipcRenderer.invoke('profiles:getAll'),
+    getActive: () => ipcRenderer.invoke('profiles:getActive'),
+    setActive: (id: string) => ipcRenderer.invoke('profiles:setActive', id),
+    delete:    (id: string) => ipcRenderer.invoke('profiles:delete', id),
+  },
+  versions: {
+    getManifest:   () => ipcRenderer.invoke('versions:getManifest'),
+    getVersionInfo:(id: string) => ipcRenderer.invoke('versions:getVersionInfo', id),
+  },
+  launcher: {
+    launch: (opts: any) => ipcRenderer.invoke('launcher:launch', opts),
+  },
+  java: {
+    detect:   (versionId: string)    => ipcRenderer.invoke('java:detect', versionId),
+    download: (majorVersion: number) => ipcRenderer.invoke('java:download', majorVersion),
+  },
+  settings: {
+    get:          () => ipcRenderer.invoke('settings:get'),
+    save:         (s: any)  => ipcRenderer.invoke('settings:save', s),
+    selectDir:    () => ipcRenderer.invoke('settings:selectDir'),
+    selectJava:   () => ipcRenderer.invoke('settings:selectJava'),
+    getDefaultDir:() => ipcRenderer.invoke('settings:getDefaultDir'),
+  },
+  on: (channel: string, cb: (...args: any[]) => void) => {
+    const allowed = ['download:progress', 'launch:log', 'launch:exit']
+    if (!allowed.includes(channel)) return
+    const wrapper = (_: Electron.IpcRendererEvent, ...args: any[]) => cb(...args)
+    ipcRenderer.on(channel, wrapper)
+    return () => ipcRenderer.removeListener(channel, wrapper)
+  },
+  off: (channel: string, cb: (...args: any[]) => void) => {
+    ipcRenderer.removeListener(channel, cb)
   },
 }
 
 contextBridge.exposeInMainWorld('nexus', api)
-
-export type NexusAPI = typeof api
