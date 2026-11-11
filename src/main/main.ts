@@ -1,16 +1,27 @@
 import { app, BrowserWindow, ipcMain, shell, safeStorage } from 'electron'
 import path from 'path'
+import fs from 'fs'
 import log from 'electron-log'
 import { setupAuthHandlers } from './ipc/authHandlers'
 import { setupLauncherHandlers } from './ipc/launcherHandlers'
 import { setupVersionHandlers } from './ipc/versionHandlers'
 import { setupSettingsHandlers } from './ipc/settingsHandlers'
 import { setupProfileHandlers } from './ipc/profileHandlers'
+import { setupSkinHandlers } from './ipc/skinHandlers'
 
 log.initialize()
 log.transports.file.level = 'info'
 
 let mainWindow: BrowserWindow | null = null
+
+function resolveIcon(): string | undefined {
+  const candidates = [
+    path.join(process.resourcesPath, 'icon.ico'),
+    path.join(__dirname, '../../assets/icon.ico'),
+    path.join(app.getAppPath(), 'assets', 'icon.ico'),
+  ]
+  return candidates.find((p) => fs.existsSync(p))
+}
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -21,11 +32,12 @@ function createWindow() {
     frame: false,
     titleBarStyle: 'hidden',
     backgroundColor: '#0f0f0f',
+    icon: resolveIcon(),
     webPreferences: {
       preload: path.join(__dirname, '../preload/preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false, // sandbox:true bloquea safeStorage en algunos sistemas
+      sandbox: false,
       webSecurity: true,
     },
   })
@@ -52,6 +64,7 @@ app.whenReady().then(() => {
   setupVersionHandlers()
   setupSettingsHandlers()
   setupProfileHandlers()
+  setupSkinHandlers()
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()

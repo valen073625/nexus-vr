@@ -1,9 +1,10 @@
 import React from 'react'
 import { useStore, type Screen } from '../../store/useStore'
 
-const NAV: { id: Screen; label: string; icon: string }[] = [
-  { id: 'main',     label: 'Inicio',       icon: '🏠' },
-  { id: 'settings', label: 'Configuración', icon: '⚙️' },
+const NAV: { id: Screen; label: string }[] = [
+  { id: 'main', label: 'Inicio' },
+  { id: 'skins', label: 'Skins' },
+  { id: 'settings', label: 'Configuracion' },
 ]
 
 export function Sidebar() {
@@ -19,8 +20,7 @@ export function Sidebar() {
 
   return (
     <aside className="sidebar">
-      <div className="sidebar-logo">⬡ <strong>Nexus</strong></div>
-
+      <div className="sidebar-logo"><strong>Nexus</strong></div>
       <nav className="sidebar-nav">
         {NAV.map(item => (
           <button
@@ -28,12 +28,10 @@ export function Sidebar() {
             className={`nav-item ${screen === item.id ? 'active' : ''}`}
             onClick={() => setScreen(item.id)}
           >
-            <span>{item.icon}</span>
             <span>{item.label}</span>
           </button>
         ))}
       </nav>
-
       <div className="sidebar-bottom">
         {activeProfile && (
           <div className="profile-card">
@@ -43,14 +41,12 @@ export function Sidebar() {
             <div className="profile-info">
               <span className="profile-name">{activeProfile.username}</span>
               <span className={`profile-type ${activeProfile.type}`}>
-                {activeProfile.type === 'microsoft' ? '⭐ Premium' : '🔒 Offline'}
+                {activeProfile.type === 'microsoft' ? 'Premium' : 'Offline'}
               </span>
             </div>
           </div>
         )}
-        <button className="logout-btn" onClick={handleLogout}>
-          ↩ Cerrar sesión
-        </button>
+        <button className="logout-btn" onClick={handleLogout}>Cerrar sesion</button>
       </div>
     </aside>
   )
