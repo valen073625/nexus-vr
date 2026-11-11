@@ -1,9 +1,10 @@
-import { app, BrowserWindow, ipcMain } from 'electron'
+import { app, BrowserWindow } from 'electron'
 import path from 'path'
 import log from 'electron-log'
 import { setupSettingsHandlers } from './ipc/settingsHandlers'
 import { setupProfileHandlers } from './ipc/profileHandlers'
 import { setupVersionHandlers } from './ipc/versionHandlers'
+import { setupLaunchHandlers } from './ipc/launchHandlers'
 
 log.initialize()
 log.info('Nexus Launcher starting...')
@@ -26,7 +27,6 @@ function createWindow() {
     },
   })
 
-  // En desarrollo carga Vite, en producción el build estático
   if (!app.isPackaged) {
     mainWindow.loadURL('http://localhost:5173')
     mainWindow.webContents.openDevTools({ mode: 'detach' })
@@ -47,6 +47,7 @@ app.whenReady().then(() => {
   setupSettingsHandlers()
   setupProfileHandlers()
   setupVersionHandlers()
+  setupLaunchHandlers()
 
   createWindow()
 
@@ -63,7 +64,6 @@ app.on('window-all-closed', () => {
   }
 })
 
-// Evitar múltiples instancias
 const gotTheLock = app.requestSingleInstanceLock()
 if (!gotTheLock) {
   app.quit()
