@@ -5,7 +5,10 @@ import crypto from 'crypto'
 import log from 'electron-log'
 import { SettingsService } from './settings'
 import { JavaService } from './java'
+import { JavaRuntimesService } from './javaRuntimes'
 import { InstallService, ProgressCallback } from './install'
+import { SkinsService } from './skins'
+import { skinServer } from './skinServer'
 
 function offlineUUID(username: string): string {
   const hash = crypto.createHash('md5').update('OfflinePlayer:' + username, 'utf8').digest()
@@ -41,7 +44,6 @@ function rulesAllow(rules: any[] | undefined): boolean {
       if (rule.os.arch !== arch && rule.os.arch !== process.arch) match = false
     }
     if (rule.features) {
-      // features (is_demo_user, has_custom_resolution, etc.) -> no aplicar por defecto
       match = false
     }
     if (match) {
@@ -63,7 +65,9 @@ export type GameExitCallback = (info: GameExitInfo) => void
 export class LaunchService {
   private settings = new SettingsService()
   private java = new JavaService()
+  private runtimes = new JavaRuntimesService()
   private install = new InstallService()
+  private skins = new SkinsService()
   private gameProcess: ChildProcess | null = null
   private onGameExit: GameExitCallback | null = null
   private launchedAt = 0
@@ -111,24 +115,50 @@ export class LaunchService {
         stage: 'java',
         current: 0,
         total: 1,
-        message: 'Buscando Java...',
+        message: 'Preparando Java...',
       })
 
-      const javaPath = await this.java.resolveJavaPath(settings.javaPath)
-      const javaVerStr = await this.java.getJavaVersion(javaPath)
-      const javaMajor = this.java.parseMajor(javaVerStr)
       const required = this.java.requiredJavaMajor(versionId)
+      const { javaPath, major: javaMajor } = await this.runtimes.resolveForMinecraft(
+        versionId,
+        settings.javaPath,
+        (msg, current, total) => {
+          options.onProgress?.({
+            stage: 'java',
+            current: current || 0,
+            total: total || 1,
+            message: msg,
+          })
+        }
+      )
+
+      const javaVerStr = await this.java.getJavaVersion(javaPath)
       log.info('Using Java:', javaPath, javaVerStr, 'major=', javaMajor, 'required=', required)
 
       let javaWarning: string | undefined
-      if (javaMajor > 0 && javaMajor < required) {
-        return {
-          success: false,
-          error: `Esta version de Minecraft (${versionId}) necesita Java ${required}+. Tienes Java ${javaMajor} (${javaVerStr}). Instala una Java mas nueva y reinicia el launcher.`,
-        }
-      }
       if (required <= 8 && javaMajor >= 17) {
-        javaWarning = `Minecraft ${versionId} es antigua y a veces falla con Java ${javaMajor}. Si se cierra al instante, prueba Java 8 u 11.`
+        javaWarning = `Minecraft ${versionId} es antigua; si falla, avisa y añadimos Java 8 automatico.`
+      }
+
+      // Skin offline via authlib-injector
+      let agentArg: string | null = null
+      try {
+        const skinPath = this.skins.getActiveFilePath()
+        options.onProgress?.({
+          stage: 'skin',
+          current: 0,
+          total: 1,
+          message: skinPath ? 'Preparando skin...' : 'Sin skin custom',
+        })
+        const skin = await skinServer.start({
+          username,
+          uuid,
+          skinPath,
+        })
+        agentArg = skin.agentArg
+        log.info('Skin agent:', agentArg)
+      } catch (e: any) {
+        log.warn('Skin server / authlib failed, launching without custom skin:', e.message)
       }
 
       const versionsDir = path.join(gameDir, 'versions', versionId)
@@ -141,7 +171,6 @@ export class LaunchService {
         return { success: false, error: `No se encontro el cliente: ${clientJar}` }
       }
 
-      // Classpath unico
       const seen = new Set<string>()
       const classpathParts: string[] = []
       const addCp = (p: string) => {
@@ -175,7 +204,7 @@ export class LaunchService {
         '${auth_uuid}': uuid,
         '${auth_access_token}': accessToken,
         '${auth_session}': accessToken,
-        '${user_type}': 'legacy',
+        '${user_type}': 'msa',
         '${version_type}': versionJson.type || 'release',
         '${natives_directory}': nativesDir,
         '${launcher_name}': 'nexus-launcher',
@@ -188,17 +217,20 @@ export class LaunchService {
         '${resolution_height}': '480',
       }
 
-      // Solo memoria + flags de compat al inicio (sin -cp duplicado)
       const jvmArgs: string[] = [
         `-Xmx${settings.maxRam || 2048}M`,
         `-Xms${settings.minRam || 512}M`,
       ]
 
+      // authlib-injector DEBE ir temprano en JVM args
+      if (agentArg) {
+        jvmArgs.push(agentArg)
+      }
+
       if (settings.jvmArgs?.trim()) {
         jvmArgs.push(...settings.jvmArgs.trim().split(/\s+/).filter(Boolean))
       }
 
-      // Compat Java 9+ con versiones viejas
       if (javaMajor >= 9 && required <= 8) {
         jvmArgs.push(
           '--add-opens=java.base/java.lang=ALL-UNNAMED',
@@ -264,7 +296,6 @@ export class LaunchService {
         }
       }
 
-      // Asegurar args minimos de juego si faltan (versiones raras)
       if (!gameArgs.includes('--version') && !gameArgs.includes('--username')) {
         gameArgs.push(
           '--username',
@@ -282,7 +313,7 @@ export class LaunchService {
           '--accessToken',
           accessToken,
           '--userType',
-          'legacy'
+          'msa'
         )
       }
 
@@ -290,14 +321,9 @@ export class LaunchService {
       log.info('Launch Java:', javaPath)
       log.info('Launch args:', fullArgs.join(' '))
 
-      // Guardar linea de comando para debug
       try {
         const cmdLog = path.join(versionsDir, 'last-launch.txt')
-        await fs.promises.writeFile(
-          cmdLog,
-          `${javaPath}\n${fullArgs.join('\n')}\n`,
-          'utf-8'
-        )
+        await fs.promises.writeFile(cmdLog, `${javaPath}\n${fullArgs.join('\n')}\n`, 'utf-8')
       } catch {
         // ignore
       }
@@ -317,14 +343,13 @@ export class LaunchService {
         windowsHide: false,
         env: {
           ...process.env,
-          // Ayuda a LWJGL a encontrar natives
-          APPDATA: process.env.APPDATA,
         },
       })
 
       const pid = this.gameProcess.pid
       if (!pid) {
         this.gameProcess = null
+        await skinServer.stop().catch(() => {})
         return { success: false, error: 'No se pudo iniciar el proceso de Minecraft' }
       }
 
@@ -345,7 +370,8 @@ export class LaunchService {
         const logTail = this.logBuffer.slice(-40).join('\n')
         log.info('Minecraft exited', { code, elapsed, quickCrash })
 
-        // Guardar crash log
+        skinServer.stop().catch(() => {})
+
         try {
           const crashPath = path.join(versionsDir, 'last-crash.log')
           fs.writeFileSync(
@@ -363,25 +389,18 @@ export class LaunchService {
         if (quickCrash) {
           message =
             'Minecraft se cerro al instante. ' +
-            (logTail
-              ? 'Revisa el error abajo.'
-              : 'Suele ser Java incompatible o natives. Prueba otra version de Java.')
-          if (logTail.toLowerCase().includes('unsupportedclassversion')) {
-            message =
-              'Java demasiado viejo para esta version de Minecraft. Instala Java ' +
-              required +
-              '+.'
-          } else if (
-            logTail.toLowerCase().includes('java.lang.unsupportedclassversionerror') ||
+            (logTail ? 'Revisa el error abajo.' : 'Suele ser Java o natives.')
+          if (
+            logTail.toLowerCase().includes('unsupportedclassversion') ||
             logTail.includes('has been compiled by a more recent')
           ) {
-            message = 'Java demasiado viejo. Instala Java ' + required + '+.'
+            message = 'Java demasiado viejo para esta version. El launcher deberia bajar Java 17/21 automaticamente; reintenta.'
           } else if (
             logTail.toLowerCase().includes('unsatisfiedlinkerror') ||
             logTail.toLowerCase().includes('no lwjgl')
           ) {
             message =
-              'Error de natives/LWJGL. Borra la carpeta natives de esa version y vuelve a jugar para re-descargar.'
+              'Error de natives/LWJGL. Borra la carpeta natives de esa version y vuelve a jugar.'
           }
         }
 
@@ -396,6 +415,7 @@ export class LaunchService {
         log.error('Minecraft process error', err)
         this.pushLog(String(err))
         this.gameProcess = null
+        skinServer.stop().catch(() => {})
         try {
           this.onGameExit?.({
             code: 1,
@@ -417,6 +437,7 @@ export class LaunchService {
       return { success: true, pid, javaWarning }
     } catch (err: any) {
       log.error('Launch failed:', err)
+      await skinServer.stop().catch(() => {})
       return { success: false, error: err.message || String(err) }
     }
   }
