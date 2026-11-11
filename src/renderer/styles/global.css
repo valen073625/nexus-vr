@@ -303,6 +303,21 @@ html, body, #root {
   white-space: pre-wrap;
 }
 
+.crash-log {
+  margin-top: 10px;
+  max-height: 180px;
+  overflow: auto;
+  padding: 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: #0c0c10;
+  color: #d0d0d8;
+  font-size: 0.72rem;
+  line-height: 1.35;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 .ok {
   margin-top: 8px;
   color: var(--ok);
