@@ -73,16 +73,21 @@ app.whenReady().then(() => {
   setupLaunchHandlers()
   setupSkinHandlers()
 
-  launchService.setOnGameExit((code) => {
-    log.info('Game session ended, restoring launcher. exit code:', code)
+  launchService.setOnGameExit((info) => {
+    log.info('Game session ended', info)
     showLauncher()
     if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send('launch:game-exited', { code })
+      mainWindow.webContents.send('launch:game-exited', info)
     }
   })
 
   ipcMain.on('launch:hide-window', () => {
-    hideLauncher()
+    // Retrasar ocultar: si crashea en <3s el usuario sigue viendo el launcher
+    setTimeout(() => {
+      if (launchService.isGameRunning()) {
+        hideLauncher()
+      }
+    }, 3500)
   })
 
   createWindow()

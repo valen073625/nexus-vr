@@ -21,7 +21,6 @@ const api = {
   isGameRunning: () => ipcRenderer.invoke('launch:isRunning'),
   hideLauncherWindow: () => ipcRenderer.send('launch:hide-window'),
 
-  // Skins
   listSkins: () => ipcRenderer.invoke('skins:list'),
   getActiveSkin: () => ipcRenderer.invoke('skins:getActive'),
   setActiveSkin: (id: string | null) => ipcRenderer.invoke('skins:setActive', id),
@@ -30,18 +29,22 @@ const api = {
   getSkinDataUrl: (id: string) => ipcRenderer.invoke('skins:getDataUrl', id),
   getActiveSkinDataUrl: () => ipcRenderer.invoke('skins:getActiveDataUrl'),
 
-  onLaunchProgress: (callback: (info: {
-    stage: string
-    current: number
-    total: number
-    message: string
-  }) => void) => {
+  onLaunchProgress: (
+    callback: (info: { stage: string; current: number; total: number; message: string }) => void
+  ) => {
     const listener = (_event: Electron.IpcRendererEvent, info: any) => callback(info)
     ipcRenderer.on('launch:progress', listener)
     return () => ipcRenderer.removeListener('launch:progress', listener)
   },
 
-  onGameExited: (callback: (info: { code: number | null }) => void) => {
+  onGameExited: (
+    callback: (info: {
+      code: number | null
+      quickCrash?: boolean
+      logTail?: string
+      message?: string
+    }) => void
+  ) => {
     const listener = (_event: Electron.IpcRendererEvent, info: any) => callback(info)
     ipcRenderer.on('launch:game-exited', listener)
     return () => ipcRenderer.removeListener('launch:game-exited', listener)

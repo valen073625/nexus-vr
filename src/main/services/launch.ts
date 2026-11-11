@@ -24,7 +24,41 @@ function applyTemplates(arg: string, map: Record<string, string>): string | null
   return result
 }
 
-export type GameExitCallback = (code: number | null) => void
+function osName(): string {
+  if (process.platform === 'win32') return 'windows'
+  if (process.platform === 'darwin') return 'osx'
+  return 'linux'
+}
+
+function rulesAllow(rules: any[] | undefined): boolean {
+  if (!rules || rules.length === 0) return true
+  let allowed = false
+  for (const rule of rules) {
+    let match = true
+    if (rule.os?.name && rule.os.name !== osName()) match = false
+    if (rule.os?.arch) {
+      const arch = process.arch === 'x64' ? 'x86_64' : process.arch
+      if (rule.os.arch !== arch && rule.os.arch !== process.arch) match = false
+    }
+    if (rule.features) {
+      // features (is_demo_user, has_custom_resolution, etc.) -> no aplicar por defecto
+      match = false
+    }
+    if (match) {
+      allowed = rule.action === 'allow'
+    }
+  }
+  return allowed
+}
+
+export type GameExitInfo = {
+  code: number | null
+  quickCrash: boolean
+  logTail: string
+  message?: string
+}
+
+export type GameExitCallback = (info: GameExitInfo) => void
 
 export class LaunchService {
   private settings = new SettingsService()
@@ -32,6 +66,8 @@ export class LaunchService {
   private install = new InstallService()
   private gameProcess: ChildProcess | null = null
   private onGameExit: GameExitCallback | null = null
+  private launchedAt = 0
+  private logBuffer: string[] = []
 
   setOnGameExit(cb: GameExitCallback | null) {
     this.onGameExit = cb
@@ -41,20 +77,29 @@ export class LaunchService {
     return this.gameProcess !== null && this.gameProcess.exitCode === null
   }
 
+  private pushLog(line: string) {
+    const t = line.trim()
+    if (!t) return
+    this.logBuffer.push(t)
+    if (this.logBuffer.length > 80) this.logBuffer.shift()
+  }
+
   async launch(options: {
     versionId: string
     username?: string
     onProgress?: ProgressCallback
-  }): Promise<{ success: true; pid: number } | { success: false; error: string }> {
+  }): Promise<{ success: true; pid: number; javaWarning?: string } | { success: false; error: string }> {
     try {
       if (this.isGameRunning()) {
-        return { success: false, error: 'Minecraft ya está en ejecución' }
+        return { success: false, error: 'Minecraft ya esta en ejecucion' }
       }
 
+      this.logBuffer = []
       const settings = this.settings.getSettings()
       const gameDir = settings.gameDir
       const versionId = options.versionId
-      const username = (options.username || 'Player').replace(/[^a-zA-Z0-9_]/g, '').slice(0, 16) || 'Player'
+      const username =
+        (options.username || 'Player').replace(/[^a-zA-Z0-9_]/g, '').slice(0, 16) || 'Player'
       const uuid = offlineUUID(username)
       const accessToken = '0'
 
@@ -70,8 +115,21 @@ export class LaunchService {
       })
 
       const javaPath = await this.java.resolveJavaPath(settings.javaPath)
-      const javaVer = await this.java.getJavaVersion(javaPath)
-      log.info('Using Java:', javaPath, javaVer)
+      const javaVerStr = await this.java.getJavaVersion(javaPath)
+      const javaMajor = this.java.parseMajor(javaVerStr)
+      const required = this.java.requiredJavaMajor(versionId)
+      log.info('Using Java:', javaPath, javaVerStr, 'major=', javaMajor, 'required=', required)
+
+      let javaWarning: string | undefined
+      if (javaMajor > 0 && javaMajor < required) {
+        return {
+          success: false,
+          error: `Esta version de Minecraft (${versionId}) necesita Java ${required}+. Tienes Java ${javaMajor} (${javaVerStr}). Instala una Java mas nueva y reinicia el launcher.`,
+        }
+      }
+      if (required <= 8 && javaMajor >= 17) {
+        javaWarning = `Minecraft ${versionId} es antigua y a veces falla con Java ${javaMajor}. Si se cierra al instante, prueba Java 8 u 11.`
+      }
 
       const versionsDir = path.join(gameDir, 'versions', versionId)
       const clientJar = path.join(versionsDir, `${versionId}.jar`)
@@ -79,27 +137,32 @@ export class LaunchService {
       const assetsDir = path.join(gameDir, 'assets')
       const librariesDir = path.join(gameDir, 'libraries')
 
+      if (!fs.existsSync(clientJar)) {
+        return { success: false, error: `No se encontro el cliente: ${clientJar}` }
+      }
+
+      // Classpath unico
+      const seen = new Set<string>()
       const classpathParts: string[] = []
-      for (const lib of versionJson.libraries || []) {
-        if (!lib.downloads?.artifact) continue
-        if (lib.rules) {
-          let allowed = false
-          for (const rule of lib.rules) {
-            let match = true
-            if (rule.os?.name) {
-              const osMap: Record<string, string> = { win32: 'windows', darwin: 'osx', linux: 'linux' }
-              if (rule.os.name !== osMap[process.platform]) match = false
-            }
-            if (match) allowed = rule.action === 'allow'
-          }
-          if (!allowed) continue
+      const addCp = (p: string) => {
+        const n = path.normalize(p)
+        if (seen.has(n)) return
+        if (!fs.existsSync(n)) {
+          log.warn('Missing library on classpath:', n)
+          return
         }
-        const artifactPath = path.join(librariesDir, lib.downloads.artifact.path)
-        if (fs.existsSync(artifactPath)) {
-          classpathParts.push(artifactPath)
+        seen.add(n)
+        classpathParts.push(n)
+      }
+
+      for (const lib of versionJson.libraries || []) {
+        if (!rulesAllow(lib.rules)) continue
+        if (lib.downloads?.artifact?.path) {
+          addCp(path.join(librariesDir, lib.downloads.artifact.path))
         }
       }
-      classpathParts.push(clientJar)
+      addCp(clientJar)
+
       const classpath = classpathParts.join(process.platform === 'win32' ? ';' : ':')
 
       const replacements: Record<string, string> = {
@@ -107,9 +170,11 @@ export class LaunchService {
         '${version_name}': versionId,
         '${game_directory}': gameDir,
         '${assets_root}': assetsDir,
+        '${game_assets}': path.join(assetsDir, 'virtual', 'legacy'),
         '${assets_index_name}': versionJson.assetIndex?.id || versionJson.assets || 'legacy',
         '${auth_uuid}': uuid,
         '${auth_access_token}': accessToken,
+        '${auth_session}': accessToken,
         '${user_type}': 'legacy',
         '${version_type}': versionJson.type || 'release',
         '${natives_directory}': nativesDir,
@@ -117,55 +182,60 @@ export class LaunchService {
         '${launcher_version}': '1.0.0',
         '${classpath}': classpath,
         '${user_properties}': '{}',
-        '${clientid}': '',
-        '${auth_xuid}': '',
+        '${clientid}': '0',
+        '${auth_xuid}': '0',
+        '${resolution_width}': '854',
+        '${resolution_height}': '480',
       }
 
+      // Solo memoria + flags de compat al inicio (sin -cp duplicado)
       const jvmArgs: string[] = [
-        `-Xmx${settings.maxRam}M`,
-        `-Xms${settings.minRam}M`,
-        `-Djava.library.path=${nativesDir}`,
-        `-Dminecraft.launcher.brand=nexus-launcher`,
-        `-Dminecraft.launcher.version=1.0.0`,
+        `-Xmx${settings.maxRam || 2048}M`,
+        `-Xms${settings.minRam || 512}M`,
       ]
 
       if (settings.jvmArgs?.trim()) {
         jvmArgs.push(...settings.jvmArgs.trim().split(/\s+/).filter(Boolean))
       }
 
+      // Compat Java 9+ con versiones viejas
+      if (javaMajor >= 9 && required <= 8) {
+        jvmArgs.push(
+          '--add-opens=java.base/java.lang=ALL-UNNAMED',
+          '--add-opens=java.base/java.lang.reflect=ALL-UNNAMED',
+          '--add-opens=java.base/java.io=ALL-UNNAMED'
+        )
+      }
+
+      let hasCp = false
+      let hasNatives = false
+
       if (versionJson.arguments?.jvm) {
         for (const arg of versionJson.arguments.jvm) {
           if (typeof arg === 'string') {
             const applied = applyTemplates(arg, replacements)
-            if (applied) jvmArgs.push(applied)
+            if (!applied) continue
+            if (applied === '-cp' || applied === '-classpath') hasCp = true
+            if (applied.includes('java.library.path')) hasNatives = true
+            jvmArgs.push(applied)
           } else if (arg && typeof arg === 'object' && arg.value) {
-            let allow = true
-            if (arg.rules) {
-              allow = false
-              for (const rule of arg.rules) {
-                let match = true
-                if (rule.os?.name) {
-                  const osMap: Record<string, string> = { win32: 'windows', darwin: 'osx', linux: 'linux' }
-                  if (rule.os.name !== osMap[process.platform]) match = false
-                }
-                if (rule.os?.arch && rule.os.arch !== process.arch) match = false
-                if (match && rule.action === 'allow') allow = true
-                if (match && rule.action === 'disallow') allow = false
-              }
-            }
-            if (!allow) continue
+            if (!rulesAllow(arg.rules)) continue
             const values = Array.isArray(arg.value) ? arg.value : [arg.value]
             for (const v of values) {
               const applied = applyTemplates(String(v), replacements)
-              if (applied) jvmArgs.push(applied)
+              if (!applied) continue
+              if (applied === '-cp' || applied === '-classpath') hasCp = true
+              if (applied.includes('java.library.path')) hasNatives = true
+              jvmArgs.push(applied)
             }
           }
         }
-      } else {
-        jvmArgs.push('-cp', classpath)
       }
 
-      if (!jvmArgs.some((a) => a === '-cp' || a === '-classpath')) {
+      if (!hasNatives) {
+        jvmArgs.push(`-Djava.library.path=${nativesDir}`)
+      }
+      if (!hasCp) {
         jvmArgs.push('-cp', classpath)
       }
 
@@ -178,18 +248,7 @@ export class LaunchService {
             const applied = applyTemplates(arg, replacements)
             if (applied) gameArgs.push(applied)
           } else if (arg && typeof arg === 'object' && arg.value) {
-            let allow = true
-            if (arg.rules) {
-              allow = false
-              for (const rule of arg.rules) {
-                if (rule.features) {
-                  allow = false
-                  break
-                }
-                if (rule.action === 'allow') allow = true
-              }
-            }
-            if (!allow) continue
+            if (!rulesAllow(arg.rules)) continue
             const values = Array.isArray(arg.value) ? arg.value : [arg.value]
             for (const v of values) {
               const applied = applyTemplates(String(v), replacements)
@@ -198,14 +257,50 @@ export class LaunchService {
           }
         }
       } else if (versionJson.minecraftArguments) {
-        for (const part of versionJson.minecraftArguments.split(' ')) {
+        for (const part of String(versionJson.minecraftArguments).split(/\s+/)) {
+          if (!part) continue
           const applied = applyTemplates(part, replacements)
           if (applied) gameArgs.push(applied)
         }
       }
 
+      // Asegurar args minimos de juego si faltan (versiones raras)
+      if (!gameArgs.includes('--version') && !gameArgs.includes('--username')) {
+        gameArgs.push(
+          '--username',
+          username,
+          '--version',
+          versionId,
+          '--gameDir',
+          gameDir,
+          '--assetsDir',
+          assetsDir,
+          '--assetIndex',
+          versionJson.assetIndex?.id || versionJson.assets || 'legacy',
+          '--uuid',
+          uuid,
+          '--accessToken',
+          accessToken,
+          '--userType',
+          'legacy'
+        )
+      }
+
       const fullArgs = [...jvmArgs, mainClass, ...gameArgs]
-      log.info('Launch command:', javaPath, fullArgs.join(' '))
+      log.info('Launch Java:', javaPath)
+      log.info('Launch args:', fullArgs.join(' '))
+
+      // Guardar linea de comando para debug
+      try {
+        const cmdLog = path.join(versionsDir, 'last-launch.txt')
+        await fs.promises.writeFile(
+          cmdLog,
+          `${javaPath}\n${fullArgs.join('\n')}\n`,
+          'utf-8'
+        )
+      } catch {
+        // ignore
+      }
 
       options.onProgress?.({
         stage: 'launch',
@@ -214,13 +309,17 @@ export class LaunchService {
         message: 'Iniciando Minecraft...',
       })
 
-      // Sin detached/unref: necesitamos detectar el cierre del juego
+      this.launchedAt = Date.now()
       this.gameProcess = spawn(javaPath, fullArgs, {
         cwd: gameDir,
         detached: false,
         stdio: ['ignore', 'pipe', 'pipe'],
         windowsHide: false,
-        env: { ...process.env },
+        env: {
+          ...process.env,
+          // Ayuda a LWJGL a encontrar natives
+          APPDATA: process.env.APPDATA,
+        },
       })
 
       const pid = this.gameProcess.pid
@@ -229,14 +328,65 @@ export class LaunchService {
         return { success: false, error: 'No se pudo iniciar el proceso de Minecraft' }
       }
 
-      this.gameProcess.stdout?.on('data', (d) => log.info('[MC]', d.toString().trim()))
-      this.gameProcess.stderr?.on('data', (d) => log.warn('[MC]', d.toString().trim()))
+      this.gameProcess.stdout?.on('data', (d) => {
+        const s = d.toString()
+        log.info('[MC]', s.trim())
+        this.pushLog(s)
+      })
+      this.gameProcess.stderr?.on('data', (d) => {
+        const s = d.toString()
+        log.warn('[MC]', s.trim())
+        this.pushLog(s)
+      })
 
       this.gameProcess.on('exit', (code) => {
-        log.info('Minecraft exited with code', code)
-        this.gameProcess = null
+        const elapsed = Date.now() - this.launchedAt
+        const quickCrash = elapsed < 8000
+        const logTail = this.logBuffer.slice(-40).join('\n')
+        log.info('Minecraft exited', { code, elapsed, quickCrash })
+
+        // Guardar crash log
         try {
-          this.onGameExit?.(code)
+          const crashPath = path.join(versionsDir, 'last-crash.log')
+          fs.writeFileSync(
+            crashPath,
+            `exitCode=${code}\nelapsedMs=${elapsed}\n\n${logTail}\n`,
+            'utf-8'
+          )
+        } catch {
+          // ignore
+        }
+
+        this.gameProcess = null
+
+        let message: string | undefined
+        if (quickCrash) {
+          message =
+            'Minecraft se cerro al instante. ' +
+            (logTail
+              ? 'Revisa el error abajo.'
+              : 'Suele ser Java incompatible o natives. Prueba otra version de Java.')
+          if (logTail.toLowerCase().includes('unsupportedclassversion')) {
+            message =
+              'Java demasiado viejo para esta version de Minecraft. Instala Java ' +
+              required +
+              '+.'
+          } else if (
+            logTail.toLowerCase().includes('java.lang.unsupportedclassversionerror') ||
+            logTail.includes('has been compiled by a more recent')
+          ) {
+            message = 'Java demasiado viejo. Instala Java ' + required + '+.'
+          } else if (
+            logTail.toLowerCase().includes('unsatisfiedlinkerror') ||
+            logTail.toLowerCase().includes('no lwjgl')
+          ) {
+            message =
+              'Error de natives/LWJGL. Borra la carpeta natives de esa version y vuelve a jugar para re-descargar.'
+          }
+        }
+
+        try {
+          this.onGameExit?.({ code, quickCrash, logTail, message })
         } catch (e) {
           log.error('onGameExit error', e)
         }
@@ -244,22 +394,27 @@ export class LaunchService {
 
       this.gameProcess.on('error', (err) => {
         log.error('Minecraft process error', err)
+        this.pushLog(String(err))
         this.gameProcess = null
         try {
-          this.onGameExit?.(1)
+          this.onGameExit?.({
+            code: 1,
+            quickCrash: true,
+            logTail: this.logBuffer.join('\n'),
+            message: 'No se pudo ejecutar Java/Minecraft: ' + err.message,
+          })
         } catch {
           // ignore
         }
       })
 
-      // Guardar última versión elegida
       try {
         this.settings.saveSettings({ selectedVersion: versionId })
       } catch {
         // ignore
       }
 
-      return { success: true, pid }
+      return { success: true, pid, javaWarning }
     } catch (err: any) {
       log.error('Launch failed:', err)
       return { success: false, error: err.message || String(err) }
@@ -267,5 +422,4 @@ export class LaunchService {
   }
 }
 
-/** Singleton compartido entre IPC y main */
 export const launchService = new LaunchService()
