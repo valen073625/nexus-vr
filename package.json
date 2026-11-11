@@ -47,8 +47,6 @@
     },
     "files": [
       "dist/**/*",
-      "assets/**/*",
-      "node_modules/**/*",
       "package.json"
     ],
     "win": {
@@ -57,8 +55,7 @@
           "target": "portable",
           "arch": ["x64"]
         }
-      ],
-      "icon": "assets/icon.ico"
+      ]
     },
     "portable": {
       "artifactName": "Nexus-Launcher-${version}-portable.exe"
