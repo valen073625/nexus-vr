@@ -76,6 +76,18 @@ export class VersionsService {
     return res.data
   }
 
+  async getPlayableVersions() {
+    const manifest = await this.getVersionManifest()
+    const releases = manifest.versions.filter((v) => v.type === 'release')
+    const snapshots = manifest.versions.filter((v) => v.type === 'snapshot')
+    return {
+      latest: manifest.latest,
+      releases,
+      snapshots,
+      versions: [...releases, ...snapshots],
+    }
+  }
+
   async getVersionInfo(versionId: string): Promise<VersionInfo> {
     const manifest = await this.getVersionManifest()
     const entry = manifest.versions.find(v => v.id === versionId)
