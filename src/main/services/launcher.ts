@@ -42,17 +42,19 @@ function writeOptions(gameDir: string, opt: OptimizeOptions) {
     }
   }
   const set = (k: string, v: string) => map.set(k, v)
-  set('renderDistance', String(opt.renderDistance))
-  set('particles', String(opt.particles))
-  set('entityDistanceScaling', String(opt.entityDistance))
+  set('renderDistance', String(Math.min(8, opt.renderDistance)))
+  set('particles', '2')
+  set('entityDistanceScaling', String(Math.min(0.5, opt.entityDistance)))
   set('maxFps', String(opt.maxFps))
-  set('enableVsync', String(opt.vsync))
-  set('mipmapLevels', String(opt.mipmap))
-  set('clouds', String(opt.clouds))
-  set('graphicsMode', opt.fastGraphics ? '0' : '1')
-  set('ao', String(opt.smoothLighting))
+  set('enableVsync', 'false')
+  set('mipmapLevels', '0')
+  set('clouds', 'false')
+  set('graphicsMode', '0')
+  set('ao', 'false')
   set('biomeBlendRadius', '0')
-  set('renderClouds', opt.clouds ? 'true' : 'false')
+  set('renderClouds', 'false')
+  set('fancyGraphics', 'false')
+  set('renderDistance', String(Math.min(8, opt.renderDistance)))
   const body = Array.from(map.entries()).map(([k, v]) => `${k}:${v}`).join('\n') + '\n'
   fs.writeFileSync(file, body, 'utf8')
 }
@@ -83,20 +85,21 @@ export class LauncherService {
     }
 
     const args = this.buildArgs(info, opts, agentArg)
+    log.info('RAM efectiva', args.find(a => a.startsWith('-Xmx')), args.find(a => a.startsWith('-Xms')))
     const proc = spawn(opts.javaPath, args, {
       cwd: opts.gameDir,
       detached: true,
       stdio: 'ignore',
+      windowsHide: false,
     })
     proc.unref()
     proc.on('error', err => log.error('Error al lanzar:', err))
     proc.on('exit', () => { skinServer.stop().catch(() => {}) })
-    log.info(`Minecraft iniciado PID: ${proc.pid} ram=${opts.maxRam}`)
   }
 
   private buildArgs(info: VersionInfo, opts: LaunchOptions, agentArg: string | null): string[] {
     const args: string[] = []
-    const verDir   = path.join(opts.gameDir, 'versions', opts.versionId)
+    const verDir = path.join(opts.gameDir, 'versions', opts.versionId)
     const nativDir = path.join(verDir, 'natives')
     const assetsDir = path.join(opts.gameDir, 'assets')
     fs.mkdirSync(nativDir, { recursive: true })
@@ -104,18 +107,18 @@ export class LauncherService {
 
     const maxRam = Math.max(512, Number(opts.maxRam) || 2048)
     const minRam = Math.min(Math.max(256, Number(opts.minRam) || 512), maxRam)
-    args.push(`-Xmx${maxRam}M`, `-Xms${minRam}M`)
+
     if (agentArg) args.push(agentArg)
     args.push(`-Djava.library.path=${nativDir}`)
     args.push('-Dminecraft.launcher.brand=nexus-launcher')
-    args.push('-Dminecraft.launcher.version=1.0.2')
+    args.push('-Dminecraft.launcher.version=1.0.3')
     args.push('-Dlog4j2.formatMsgNoLookups=true')
 
     if (info.arguments?.jvm) {
       const jvmVars: Record<string, string> = {
         natives_directory: nativDir,
         launcher_name: 'nexus-launcher',
-        launcher_version: '1.0.2',
+        launcher_version: '1.0.3',
         classpath: cp,
       }
       for (const arg of this.resolveArgs(info.arguments.jvm, jvmVars)) {
@@ -127,7 +130,10 @@ export class LauncherService {
     }
 
     if (opts.jvmArgs?.trim()) {
-      args.push(...opts.jvmArgs.trim().split(/\s+/))
+      for (const part of opts.jvmArgs.trim().split(/\s+/)) {
+        if (part.startsWith('-Xmx') || part.startsWith('-Xms')) continue
+        args.push(part)
+      }
     }
 
     if (info.logging?.client) {
@@ -137,12 +143,10 @@ export class LauncherService {
       }
     }
 
+    args.push(`-Xms${minRam}M`, `-Xmx${maxRam}M`)
     args.push(info.mainClass)
 
-    const accessToken = opts.profileType === 'microsoft'
-      ? (opts.profileData.accessToken ?? '0')
-      : '0'
-
+    const accessToken = opts.profileType === 'microsoft' ? (opts.profileData.accessToken ?? '0') : '0'
     const gameVars: Record<string, string> = {
       auth_player_name: opts.profileData.username,
       version_name: opts.versionId,
@@ -163,7 +167,6 @@ export class LauncherService {
     } else if (info.minecraftArguments) {
       args.push(...info.minecraftArguments.split(' ').map(a => this.replaceVars(a, gameVars)))
     }
-
     return args
   }
 
@@ -177,9 +180,8 @@ export class LauncherService {
   private resolveArgs(args: (string | ArgRule)[], vars: Record<string, string>): string[] {
     const result: string[] = []
     for (const arg of args) {
-      if (typeof arg === 'string') {
-        result.push(this.replaceVars(arg, vars))
-      } else if (this.rulesAllow(arg.rules)) {
+      if (typeof arg === 'string') result.push(this.replaceVars(arg, vars))
+      else if (this.rulesAllow(arg.rules)) {
         const vals = Array.isArray(arg.value) ? arg.value : [arg.value]
         result.push(...vals.map(v => this.replaceVars(v, vars)))
       }
@@ -188,15 +190,14 @@ export class LauncherService {
   }
 
   private replaceVars(template: string, vars: Record<string, string>): string {
-    return template.replace(/\$\{(\w+)\}/g, (_, k) => vars[k] ?? `\${${k}}`)
+    return template.replace(/\$\{(\w+)\}/g, (_, k) => vars[k] ?? '')
   }
 
   private rulesAllow(rules: ArgRule['rules']): boolean {
     let allowed = false
     for (const rule of rules) {
       const osOk = !rule.os || this.osMatches(rule.os)
-      const featOk = !rule.features
-      if (osOk && featOk) allowed = rule.action === 'allow'
+      if (osOk && !rule.features) allowed = rule.action === 'allow'
     }
     return allowed
   }
