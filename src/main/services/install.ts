@@ -39,6 +39,8 @@ interface Library {
 
 export class InstallService {
   private versions = new VersionsService()
+  /** Evita descargas concurrentes del mismo destino */
+  private inFlight = new Map<string, Promise<void>>()
 
   private getOsName(): string {
     if (process.platform === 'win32') return 'windows'
@@ -69,10 +71,14 @@ export class InstallService {
 
   private async fileMatchesSha1(filePath: string, sha1?: string): Promise<boolean> {
     if (!sha1 || !fs.existsSync(filePath)) return false
-    const hash = crypto.createHash('sha1')
-    const data = await fs.promises.readFile(filePath)
-    hash.update(data)
-    return hash.digest('hex') === sha1
+    try {
+      const hash = crypto.createHash('sha1')
+      const data = await fs.promises.readFile(filePath)
+      hash.update(data)
+      return hash.digest('hex') === sha1
+    } catch {
+      return false
+    }
   }
 
   private async downloadFile(
@@ -81,31 +87,93 @@ export class InstallService {
     sha1?: string,
     onProgress?: (downloaded: number, total: number) => void
   ): Promise<void> {
+    const key = path.normalize(dest)
+    const existing = this.inFlight.get(key)
+    if (existing) {
+      await existing
+      return
+    }
+
+    const task = this.downloadFileInner(url, dest, sha1, onProgress).finally(() => {
+      this.inFlight.delete(key)
+    })
+    this.inFlight.set(key, task)
+    await task
+  }
+
+  private async downloadFileInner(
+    url: string,
+    dest: string,
+    sha1?: string,
+    onProgress?: (downloaded: number, total: number) => void
+  ): Promise<void> {
     if (await this.fileMatchesSha1(dest, sha1)) return
+    // Si ya existe el archivo final (otra corrida), no hace falta re-descargar sin sha
+    if (!sha1 && fs.existsSync(dest)) return
 
     await this.ensureDir(path.dirname(dest))
-    const tmp = dest + '.part'
 
-    const response = await axios.get(url, {
-      responseType: 'stream',
-      timeout: 120000,
-      maxRedirects: 5,
-    })
+    // Nombre temporal único para evitar colisiones entre procesos/hilos
+    const tmp = `${dest}.${process.pid}.${Date.now()}.${Math.random().toString(16).slice(2)}.part`
 
-    const total = Number(response.headers['content-length'] || 0)
-    let downloaded = 0
+    try {
+      const response = await axios.get(url, {
+        responseType: 'stream',
+        timeout: 120000,
+        maxRedirects: 5,
+        validateStatus: (s) => s >= 200 && s < 300,
+      })
 
-    response.data.on('data', (chunk: Buffer) => {
-      downloaded += chunk.length
-      if (onProgress) onProgress(downloaded, total)
-    })
+      const total = Number(response.headers['content-length'] || 0)
+      let downloaded = 0
 
-    await pipeline(response.data, createWriteStream(tmp))
-    await fs.promises.rename(tmp, dest)
+      response.data.on('data', (chunk: Buffer) => {
+        downloaded += chunk.length
+        if (onProgress) onProgress(downloaded, total)
+      })
 
-    if (sha1 && !(await this.fileMatchesSha1(dest, sha1))) {
-      await fs.promises.unlink(dest).catch(() => {})
-      throw new Error(`SHA1 mismatch for ${path.basename(dest)}`)
+      await pipeline(response.data, createWriteStream(tmp))
+
+      // Si mientras descargábamos otro ya dejó el archivo bueno, descartar tmp
+      if (await this.fileMatchesSha1(dest, sha1)) {
+        await fs.promises.unlink(tmp).catch(() => {})
+        return
+      }
+
+      // En Windows rename falla si el destino existe
+      try {
+        if (fs.existsSync(dest)) {
+          await fs.promises.unlink(dest)
+        }
+      } catch {
+        // ignore
+      }
+
+      try {
+        await fs.promises.rename(tmp, dest)
+      } catch (err: any) {
+        // Si el .part desapareció o el dest ya está, verificar resultado final
+        if (await this.fileMatchesSha1(dest, sha1)) {
+          await fs.promises.unlink(tmp).catch(() => {})
+          return
+        }
+        // Fallback: copiar y borrar
+        try {
+          await fs.promises.copyFile(tmp, dest)
+          await fs.promises.unlink(tmp).catch(() => {})
+        } catch (err2: any) {
+          await fs.promises.unlink(tmp).catch(() => {})
+          throw new Error(`No se pudo guardar ${path.basename(dest)}: ${err2.message || err.message}`)
+        }
+      }
+
+      if (sha1 && !(await this.fileMatchesSha1(dest, sha1))) {
+        await fs.promises.unlink(dest).catch(() => {})
+        throw new Error(`SHA1 mismatch for ${path.basename(dest)}`)
+      }
+    } catch (err) {
+      await fs.promises.unlink(tmp).catch(() => {})
+      throw err
     }
   }
 
@@ -140,18 +208,24 @@ export class InstallService {
     await this.ensureDir(nativesDir)
 
     const libsToDownload: Array<{ artifact: LibraryArtifact; isNative: boolean }> = []
+    const seenLibPaths = new Set<string>()
     for (const lib of libraries) {
       if (!this.rulesAllow(lib.rules)) continue
 
       if (lib.downloads?.artifact) {
-        libsToDownload.push({ artifact: lib.downloads.artifact, isNative: false })
+        const p = lib.downloads.artifact.path
+        if (!seenLibPaths.has(p)) {
+          seenLibPaths.add(p)
+          libsToDownload.push({ artifact: lib.downloads.artifact, isNative: false })
+        }
       }
 
       const classifierKey = lib.natives?.[this.getOsName()]
       if (classifierKey && lib.downloads?.classifiers) {
         const key = classifierKey.replace('${arch}', process.arch === 'x64' ? '64' : '32')
         const nativeArt = lib.downloads.classifiers[key] || lib.downloads.classifiers[classifierKey]
-        if (nativeArt) {
+        if (nativeArt && !seenLibPaths.has(nativeArt.path)) {
+          seenLibPaths.add(nativeArt.path)
           libsToDownload.push({ artifact: nativeArt, isNative: true })
         }
       }
@@ -189,16 +263,25 @@ export class InstallService {
 
       const indexData = JSON.parse(await fs.promises.readFile(indexPath, 'utf-8'))
       const objects: Record<string, { hash: string; size: number }> = indexData.objects || {}
-      const entries = Object.entries(objects)
+
+      // Deduplicar por hash: muchos paths apuntan al mismo objeto
+      const uniqueByHash = new Map<string, { hash: string; size: number }>()
+      for (const obj of Object.values(objects)) {
+        if (obj?.hash) uniqueByHash.set(obj.hash, obj)
+      }
+      const uniqueAssets = Array.from(uniqueByHash.values())
+
       const objectsDir = path.join(gameDir, 'assets', 'objects')
+      await this.ensureDir(objectsDir)
 
       let assetDone = 0
-      const totalAssets = entries.length
-      const concurrency = 8
-      for (let i = 0; i < entries.length; i += concurrency) {
-        const batch = entries.slice(i, i + concurrency)
+      const totalAssets = uniqueAssets.length
+      const concurrency = 6
+
+      for (let i = 0; i < uniqueAssets.length; i += concurrency) {
+        const batch = uniqueAssets.slice(i, i + concurrency)
         await Promise.all(
-          batch.map(async ([, obj]) => {
+          batch.map(async (obj) => {
             const hash = obj.hash
             const sub = hash.substring(0, 2)
             const dest = path.join(objectsDir, sub, hash)
