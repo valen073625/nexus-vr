@@ -1,4 +1,4 @@
-import { app, BrowserWindow } from 'electron'
+import { app, BrowserWindow, ipcMain } from 'electron'
 import path from 'path'
 import log from 'electron-log'
 import { setupSettingsHandlers } from './ipc/settingsHandlers'
@@ -71,7 +71,6 @@ app.whenReady().then(() => {
   setupVersionHandlers()
   setupLaunchHandlers()
 
-  // Cuando Minecraft cierra, volver a mostrar el launcher
   launchService.setOnGameExit((code) => {
     log.info('Game session ended, restoring launcher. exit code:', code)
     showLauncher()
@@ -80,8 +79,6 @@ app.whenReady().then(() => {
     }
   })
 
-  // Interceptar lanzamiento exitoso para ocultar la ventana
-  const { ipcMain } = require('electron') as typeof import('electron')
   ipcMain.on('launch:hide-window', () => {
     hideLauncher()
   })
@@ -98,7 +95,6 @@ app.whenReady().then(() => {
 })
 
 app.on('window-all-closed', () => {
-  // Si el juego sigue corriendo, no cerrar la app (launcher oculto)
   if (gameSessionActive || launchService.isGameRunning()) {
     return
   }
