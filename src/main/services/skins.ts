@@ -45,7 +45,6 @@ export class SkinsService {
 
   list(): { activeId: string | null; skins: SkinInfo[] } {
     const index = this.readIndex()
-    // Filtrar skins cuyo archivo ya no existe
     const skins = index.skins.filter((s) => fs.existsSync(path.join(this.dir, s.fileName)))
     if (skins.length !== index.skins.length) {
       const activeId =
@@ -62,6 +61,13 @@ export class SkinsService {
     return skins.find((s) => s.id === activeId) || null
   }
 
+  getActiveFilePath(): string | null {
+    const active = this.getActive()
+    if (!active) return null
+    const p = path.join(this.dir, active.fileName)
+    return fs.existsSync(p) ? p : null
+  }
+
   setActive(id: string | null): void {
     const index = this.readIndex()
     if (id === null) {
@@ -76,7 +82,6 @@ export class SkinsService {
     this.writeIndex(index)
   }
 
-  /** Importa un PNG de skin (64x64 o 64x32 legacy). */
   importFromPath(sourcePath: string, displayName?: string): SkinInfo {
     if (!fs.existsSync(sourcePath)) {
       throw new Error('Archivo no encontrado')
@@ -127,7 +132,6 @@ export class SkinsService {
     this.writeIndex(index)
   }
 
-  /** Devuelve data URL de la skin para previsualizar en el renderer. */
   getDataUrl(id: string): string | null {
     const index = this.readIndex()
     const skin = index.skins.find((s) => s.id === id)
