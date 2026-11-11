@@ -58,7 +58,7 @@ export default function App() {
     })
     const unsubExit = window.nexus.onGameExited(() => {
       setBusy(false)
-      setStatus('Minecraft cerrado \u2014 launcher listo')
+      setStatus('Minecraft cerrado - launcher listo')
       setProgress(null)
     })
     return () => {
@@ -112,11 +112,11 @@ export default function App() {
       ? Math.min(100, Math.round((progress.current / progress.total) * 100))
       : null
 
-  const versionLabel = useMemo(() => versionId || '\u2014', [versionId])
+  const versionLabel = useMemo(() => versionId || '-', [versionId])
 
   async function handleLaunch() {
     if (!versionId) {
-      setError('Selecciona una versi\u00f3n')
+      setError('Selecciona una version')
       return
     }
     setBusy(true)
@@ -129,7 +129,7 @@ export default function App() {
       })
       if (result.success) {
         setStatus('Minecraft iniciado')
-        setProgress({ stage: 'done', current: 1, total: 1, message: 'Juego en ejecuci\u00f3n' })
+        setProgress({ stage: 'done', current: 1, total: 1, message: 'Juego en ejecucion' })
         window.nexus.hideLauncherWindow()
       } else {
         setError(result.error || 'Error desconocido')
@@ -153,7 +153,7 @@ export default function App() {
         setSkinMsg(result.error || 'No se pudo importar')
         return
       }
-      setSkinMsg(`Skin "${result.skin.name}" agregada`)
+      setSkinMsg('Skin "' + result.skin.name + '" agregada')
       await refreshSkins()
     } catch (e: any) {
       setSkinMsg(e?.message || String(e))
@@ -180,7 +180,6 @@ export default function App() {
       </header>
 
       <main className="main main-skins">
-        {/* Columna skin */}
         <section className="card skin-card">
           <h2>Skin del jugador</h2>
 
@@ -195,7 +194,7 @@ export default function App() {
 
             <div className="skin-actions">
               <p className="hint skin-hint">
-                Agrega una imagen PNG de skin (64\u00d764). Se guarda en el launcher y puedes cambiarla cuando quieras.
+                Agrega una imagen PNG de skin (64x64). Se guarda en el launcher y puedes cambiarla cuando quieras.
               </p>
               <button
                 className="secondary-btn"
@@ -212,7 +211,7 @@ export default function App() {
                   {skins.map((s) => (
                     <div
                       key={s.id}
-                      className={`skin-item ${s.id === activeSkinId ? 'active' : ''}`}
+                      className={'skin-item' + (s.id === activeSkinId ? ' active' : '')}
                     >
                       <button
                         type="button"
@@ -221,7 +220,7 @@ export default function App() {
                         disabled={busy}
                       >
                         {s.name}
-                        {s.id === activeSkinId ? ' \u2713' : ''}
+                        {s.id === activeSkinId ? ' *' : ''}
                       </button>
                       <button
                         type="button"
@@ -230,7 +229,7 @@ export default function App() {
                         disabled={busy}
                         title="Eliminar"
                       >
-                        \u00d7
+                        x
                       </button>
                     </div>
                   ))}
@@ -240,7 +239,6 @@ export default function App() {
           </div>
         </section>
 
-        {/* Columna jugar */}
         <section className="card launch-card">
           <h2>Jugar</h2>
 
@@ -256,7 +254,7 @@ export default function App() {
           </label>
 
           <label className="field">
-            <span>Versi\u00f3n {latest ? `(\u00faltima: ${latest})` : ''}</span>
+            <span>{'Version' + (latest ? ' (ultima: ' + latest + ')' : '')}</span>
             {versionsLoading ? (
               <div className="hint">Cargando versiones...</div>
             ) : versionsError ? (
@@ -269,8 +267,7 @@ export default function App() {
               >
                 {versions.map((v) => (
                   <option key={v.id} value={v.id}>
-                    {v.id}
-                    {v.id === latest ? ' \u2014 \u00faltima' : ''}
+                    {v.id + (v.id === latest ? ' - ultima' : '')}
                   </option>
                 ))}
               </select>
@@ -278,24 +275,24 @@ export default function App() {
           </label>
 
           <p className="hint">
-            Releases desde <strong>1.8.9</strong> hasta la \u00faltima. Al jugar el launcher se oculta y
+            Releases desde <strong>1.8.9</strong> hasta la ultima. Al jugar el launcher se oculta y
             vuelve al cerrar Minecraft.
           </p>
 
           <button className="play-btn" onClick={handleLaunch} disabled={busy || versionsLoading}>
-            {busy ? 'Trabajando...' : `Jugar ${versionLabel}`}
+            {busy ? 'Trabajando...' : 'Jugar ' + versionLabel}
           </button>
 
           <div className="status-block">
             <div className="status-line">{status}</div>
             {percent !== null && (
               <div className="progress">
-                <div className="progress-bar" style={{ width: `${percent}%` }} />
+                <div className="progress-bar" style={{ width: percent + '%' }} />
               </div>
             )}
             {progress && (
               <div className="progress-meta">
-                {progress.stage} {percent !== null ? `${percent}%` : ''}
+                {progress.stage} {percent !== null ? percent + '%' : ''}
               </div>
             )}
             {error && <div className="error">{error}</div>}
