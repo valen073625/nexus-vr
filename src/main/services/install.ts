@@ -6,7 +6,7 @@ import { pipeline } from 'stream/promises'
 import { createWriteStream } from 'fs'
 import extract from 'extract-zip'
 import log from 'electron-log'
-import { VersionsService } from './versions'
+import { VersionsService, LibraryEntry } from './versions'
 
 export type ProgressCallback = (info: {
   stage: string
@@ -15,11 +15,6 @@ export type ProgressCallback = (info: {
   message: string
 }) => void
 
-interface LibraryRule {
-  action: 'allow' | 'disallow'
-  os?: { name?: string; version?: string; arch?: string }
-}
-
 interface LibraryArtifact {
   path: string
   sha1: string
@@ -27,19 +22,8 @@ interface LibraryArtifact {
   url: string
 }
 
-interface Library {
-  name: string
-  downloads?: {
-    artifact?: LibraryArtifact
-    classifiers?: Record<string, LibraryArtifact>
-  }
-  natives?: Record<string, string>
-  rules?: LibraryRule[]
-}
-
 export class InstallService {
   private versions = new VersionsService()
-  /** Evita descargas concurrentes del mismo destino */
   private inFlight = new Map<string, Promise<void>>()
 
   private getOsName(): string {
@@ -48,19 +32,13 @@ export class InstallService {
     return 'linux'
   }
 
-  private rulesAllow(rules?: LibraryRule[]): boolean {
+  private rulesAllow(rules?: LibraryEntry['rules']): boolean {
     if (!rules || rules.length === 0) return true
     let allowed = false
     for (const rule of rules) {
       let match = true
       if (rule.os?.name && rule.os.name !== this.getOsName()) match = false
-      if (rule.os?.arch) {
-        const arch = process.arch === 'x64' ? 'x86_64' : process.arch
-        if (rule.os.arch !== arch && rule.os.arch !== process.arch) match = false
-      }
-      if (match) {
-        allowed = rule.action === 'allow'
-      }
+      if (match) allowed = rule.action === 'allow'
     }
     return allowed
   }
@@ -108,12 +86,9 @@ export class InstallService {
     onProgress?: (downloaded: number, total: number) => void
   ): Promise<void> {
     if (await this.fileMatchesSha1(dest, sha1)) return
-    // Si ya existe el archivo final (otra corrida), no hace falta re-descargar sin sha
     if (!sha1 && fs.existsSync(dest)) return
 
     await this.ensureDir(path.dirname(dest))
-
-    // Nombre temporal único para evitar colisiones entre procesos/hilos
     const tmp = `${dest}.${process.pid}.${Date.now()}.${Math.random().toString(16).slice(2)}.part`
 
     try {
@@ -134,17 +109,13 @@ export class InstallService {
 
       await pipeline(response.data, createWriteStream(tmp))
 
-      // Si mientras descargábamos otro ya dejó el archivo bueno, descartar tmp
       if (await this.fileMatchesSha1(dest, sha1)) {
         await fs.promises.unlink(tmp).catch(() => {})
         return
       }
 
-      // En Windows rename falla si el destino existe
       try {
-        if (fs.existsSync(dest)) {
-          await fs.promises.unlink(dest)
-        }
+        if (fs.existsSync(dest)) await fs.promises.unlink(dest)
       } catch {
         // ignore
       }
@@ -152,12 +123,10 @@ export class InstallService {
       try {
         await fs.promises.rename(tmp, dest)
       } catch (err: any) {
-        // Si el .part desapareció o el dest ya está, verificar resultado final
         if (await this.fileMatchesSha1(dest, sha1)) {
           await fs.promises.unlink(tmp).catch(() => {})
           return
         }
-        // Fallback: copiar y borrar
         try {
           await fs.promises.copyFile(tmp, dest)
           await fs.promises.unlink(tmp).catch(() => {})
@@ -202,7 +171,7 @@ export class InstallService {
       report('client', d, t || client.size || 1, 'Descargando client.jar...')
     })
 
-    const libraries: Library[] = versionJson.libraries || []
+    const libraries: LibraryEntry[] = versionJson.libraries || []
     const libDir = path.join(gameDir, 'libraries')
     const nativesDir = path.join(versionsDir, 'natives')
     await this.ensureDir(nativesDir)
@@ -264,7 +233,6 @@ export class InstallService {
       const indexData = JSON.parse(await fs.promises.readFile(indexPath, 'utf-8'))
       const objects: Record<string, { hash: string; size: number }> = indexData.objects || {}
 
-      // Deduplicar por hash: muchos paths apuntan al mismo objeto
       const uniqueByHash = new Map<string, { hash: string; size: number }>()
       for (const obj of Object.values(objects)) {
         if (obj?.hash) uniqueByHash.set(obj.hash, obj)
