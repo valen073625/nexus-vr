@@ -8,6 +8,7 @@ import { setupVersionHandlers } from './ipc/versionHandlers'
 import { setupSettingsHandlers } from './ipc/settingsHandlers'
 import { setupProfileHandlers } from './ipc/profileHandlers'
 import { setupSkinHandlers } from './ipc/skinHandlers'
+import { setupContentHandlers } from './ipc/contentHandlers'
 
 log.initialize()
 log.transports.file.level = 'info'
@@ -65,6 +66,7 @@ app.whenReady().then(() => {
   setupSettingsHandlers()
   setupProfileHandlers()
   setupSkinHandlers()
+  setupContentHandlers(mainWindow!)
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()

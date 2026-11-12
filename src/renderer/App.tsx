@@ -4,6 +4,7 @@ import { MainScreen } from './components/screens/MainScreen'
 import { DownloadScreen } from './components/screens/DownloadScreen'
 import { SettingsScreen } from './components/screens/SettingsScreen'
 import { SkinsScreen } from './components/screens/SkinsScreen'
+import { ExploreScreen } from './components/screens/ExploreScreen'
 import { TitleBar } from './components/ui/TitleBar'
 import { Sidebar } from './components/ui/Sidebar'
 import { useStore } from './store/useStore'
@@ -58,6 +59,7 @@ export default function App() {
             {screen === 'download' && <DownloadScreen />}
             {screen === 'settings' && <SettingsScreen />}
             {screen === 'skins' && <SkinsScreen />}
+            {screen === 'explore' && <ExploreScreen />}
           </main>
         </div>
       )}

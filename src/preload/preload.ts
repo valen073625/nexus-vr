@@ -33,6 +33,22 @@ const api = {
   launcher: {
     launch: (opts: any) => ipcRenderer.invoke('launcher:launch', opts),
   },
+  loaders: {
+    availability: (mc: string) => ipcRenderer.invoke('loaders:availability', mc),
+  },
+  instances: {
+    list: () => ipcRenderer.invoke('instances:list'),
+    remove: (id: string) => ipcRenderer.invoke('instances:remove', id),
+  },
+  content: {
+    search: (o: any) => ipcRenderer.invoke('content:search', o),
+    install: (o: any) => ipcRenderer.invoke('content:install', o),
+    installed: (mc: string, loader: string, instanceId?: string) => ipcRenderer.invoke('content:installed', mc, loader, instanceId),
+    remove: (o: any) => ipcRenderer.invoke('content:remove', o),
+  },
+  app: {
+    openExternal: (url: string) => ipcRenderer.invoke('app:openExternal', url),
+  },
   java: {
     detect: (versionId: string) => ipcRenderer.invoke('java:detect', versionId),
     download: (majorVersion: number) => ipcRenderer.invoke('java:download', majorVersion),
@@ -55,7 +71,7 @@ const api = {
     getDefaultDir: () => ipcRenderer.invoke('settings:getDefaultDir'),
   },
   on: (channel: string, cb: (...args: any[]) => void) => {
-    const allowed = ['download:progress', 'launch:log', 'launch:exit']
+    const allowed = ['download:progress', 'content:progress', 'launch:log', 'launch:exit']
     if (!allowed.includes(channel)) return
     const wrapper = (_: Electron.IpcRendererEvent, ...args: any[]) => cb(...args)
     ipcRenderer.on(channel, wrapper)

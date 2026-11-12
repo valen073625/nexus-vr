@@ -12,6 +12,11 @@ export interface AppSettings {
   showSnapshots: boolean
   theme: 'dark' | 'darker'
   closeOnLaunch: boolean
+  /** true = el launcher NO se cierra al abrir Minecraft */
+  keepLauncherOpen: boolean
+  showHud: boolean
+  curseforgeApiKey: string
+  optimize?: any
 }
 
 export class SettingsService {
@@ -42,6 +47,9 @@ export class SettingsService {
       showSnapshots: false,
       theme: 'dark',
       closeOnLaunch: false,
+      keepLauncherOpen: false,
+      showHud: false,
+      curseforgeApiKey: '',
     }
   }
 

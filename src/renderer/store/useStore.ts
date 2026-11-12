@@ -10,7 +10,7 @@ export interface Profile {
 }
 
 export interface DownloadProgress {
-  phase: 'client' | 'libraries' | 'assets' | 'java' | 'done'
+  phase: 'client' | 'libraries' | 'assets' | 'java' | 'loader' | 'mods' | 'done'
   current: number
   total: number
   currentFile: string
@@ -29,9 +29,12 @@ export interface AppSettings {
   showSnapshots: boolean
   theme: string
   closeOnLaunch: boolean
+  keepLauncherOpen?: boolean
+  showHud?: boolean
+  curseforgeApiKey?: string
 }
 
-export type Screen = 'login' | 'main' | 'download' | 'settings' | 'skins'
+export type Screen = 'login' | 'main' | 'download' | 'settings' | 'skins' | 'explore'
 
 interface StoreState {
   activeProfile: Profile | null

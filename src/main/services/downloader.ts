@@ -2,11 +2,12 @@ import axios from 'axios'
 import path from 'path'
 import fs from 'fs'
 import crypto from 'crypto'
+import extract from 'extract-zip'
 import log from 'electron-log'
-import { VersionsService, type VersionInfo, type LibraryEntry, validateUrl } from './versions'
+import { VersionsService, type VersionInfo, type LibraryEntry, validateUrl, libArtifact } from './versions'
 
 export interface DownloadProgress {
-  phase: 'client' | 'libraries' | 'assets' | 'java' | 'done'
+  phase: 'client' | 'libraries' | 'assets' | 'java' | 'loader' | 'mods' | 'done'
   current: number
   total: number
   currentFile: string
@@ -20,12 +21,12 @@ export type ProgressCallback = (p: DownloadProgress) => void
 export class DownloaderService {
   private vs = new VersionsService()
 
-  async ensureVersion(versionId: string, gameDir: string, onProgress: ProgressCallback) {
-    const info = await this.vs.getVersionInfo(versionId)
+  async ensureVersion(versionId: string, gameDir: string, onProgress: ProgressCallback, finish = true) {
+    const info = await this.vs.getVersionInfo(versionId, gameDir)
     const verDir = path.join(gameDir, 'versions', versionId)
     fs.mkdirSync(verDir, { recursive: true })
 
-    // Guardar JSON de versión
+    // Guardar JSON de versión (los loaders ya traen el suyo)
     const jsonPath = path.join(verDir, `${versionId}.json`)
     if (!fs.existsSync(jsonPath)) {
       fs.writeFileSync(jsonPath, JSON.stringify(info, null, 2))
@@ -40,13 +41,16 @@ export class DownloaderService {
       )
     }
 
-    // Librerías
+    // Librerías + natives
     await this.downloadLibs(info, gameDir, onProgress)
+    await this.extractNatives(info, gameDir, path.join(verDir, 'natives'))
 
     // Assets
     await this.downloadAssets(info, gameDir, onProgress)
 
-    onProgress({ phase: 'done', current: 1, total: 1, currentFile: '', speed: 0, downloaded: 0, totalBytes: 0 })
+    if (finish) {
+      onProgress({ phase: 'done', current: 1, total: 1, currentFile: '', speed: 0, downloaded: 0, totalBytes: 0 })
+    }
   }
 
   private async downloadLibs(info: VersionInfo, gameDir: string, onProgress: ProgressCallback) {
@@ -59,18 +63,71 @@ export class DownloaderService {
     const worker = async () => {
       while (queue.length > 0) {
         const lib = queue.shift()!
-        if (!lib.downloads.artifact) { done++; continue }
-        const { path: p, sha1, url } = lib.downloads.artifact
-        const dest = path.join(libsDir, p)
-        if (!this.verify(dest, sha1)) {
-          fs.mkdirSync(path.dirname(dest), { recursive: true })
-          await this.downloadWithRetry(url, dest, sha1)
+        const art = libArtifact(lib)
+        if (art) {
+          const dest = path.join(libsDir, art.path)
+          // url vacia = la genera el instalador de Forge/NeoForge
+          if (art.url && !this.verify(dest, art.sha1)) {
+            fs.mkdirSync(path.dirname(dest), { recursive: true })
+            const sha1 = art.sha1 ?? (await this.fetchSha1(art.url))
+            await this.downloadWithRetry(art.url, dest, sha1)
+          }
+        }
+        // Natives clásicos (1.8 - 1.18): classifier por sistema operativo
+        const nat = this.nativeClassifier(lib)
+        if (nat) {
+          const dest = path.join(libsDir, nat.path)
+          if (!this.verify(dest, nat.sha1)) {
+            fs.mkdirSync(path.dirname(dest), { recursive: true })
+            await this.downloadWithRetry(nat.url, dest, nat.sha1)
+          }
         }
         done++
-        onProgress({ phase: 'libraries', current: done, total: libs.length, currentFile: path.basename(p), speed: 0, downloaded: done, totalBytes: libs.length })
+        onProgress({ phase: 'libraries', current: done, total: libs.length, currentFile: lib.name.split(':')[1] ?? lib.name, speed: 0, downloaded: done, totalBytes: libs.length })
       }
     }
     await Promise.all(Array.from({ length: CONC }, worker))
+  }
+
+  /** Los repos Maven publican <archivo>.sha1; si existe lo usamos para verificar. */
+  private async fetchSha1(url: string): Promise<string | undefined> {
+    try {
+      validateUrl(url, true)
+      const r = await axios.get(url + '.sha1', { timeout: 15000, responseType: 'text' })
+      const h = String(r.data).trim().split(/\s+/)[0]
+      return /^[a-f0-9]{40}$/i.test(h) ? h.toLowerCase() : undefined
+    } catch { return undefined }
+  }
+
+  private nativeClassifier(lib: LibraryEntry): { path: string; url: string; sha1: string } | null {
+    if (!lib.natives || !lib.downloads?.classifiers) return null
+    const key = lib.natives[this.osName()]
+    if (!key) return null
+    const real = key.replace('${arch}', process.arch === 'ia32' ? '32' : '64')
+    const c = lib.downloads.classifiers[real]
+    return c ? { path: c.path, url: c.url, sha1: c.sha1 } : null
+  }
+
+  /** Extrae las librerias nativas (.dll) a versions/<id>/natives. Necesario en 1.8 - 1.18. */
+  private async extractNatives(info: VersionInfo, gameDir: string, nativesDir: string) {
+    const marker = path.join(nativesDir, '.nexus-natives-ok')
+    if (fs.existsSync(marker)) return
+    fs.mkdirSync(nativesDir, { recursive: true })
+    let any = false
+    for (const lib of this.filterLibs(info.libraries)) {
+      const nat = this.nativeClassifier(lib)
+      if (!nat) continue
+      const jar = path.join(gameDir, 'libraries', nat.path)
+      if (!fs.existsSync(jar)) continue
+      await extract(jar, { dir: nativesDir })
+      for (const ex of lib.extract?.exclude ?? ['META-INF/']) {
+        fs.rmSync(path.join(nativesDir, ex), { recursive: true, force: true })
+      }
+      any = true
+    }
+    fs.rmSync(path.join(nativesDir, 'META-INF'), { recursive: true, force: true })
+    if (any) log.info('Natives extraidos en', nativesDir)
+    fs.writeFileSync(marker, 'ok')
   }
 
   private async downloadAssets(info: VersionInfo, gameDir: string, onProgress: ProgressCallback) {
@@ -118,7 +175,13 @@ export class DownloaderService {
       if (!lib.rules) return true
       let allowed = false
       for (const rule of lib.rules) {
-        const matches = !rule.os || rule.os.name === this.osName()
+        let matches = true
+        if (rule.os?.name && rule.os.name !== this.osName()) matches = false
+        if (rule.os?.arch) {
+          const a = rule.os.arch
+          const ok = a === 'x86' ? process.arch === 'ia32' : a === process.arch || (a === 'x86_64' && process.arch === 'x64')
+          if (!ok) matches = false
+        }
         if (matches) allowed = rule.action === 'allow'
       }
       return allowed
@@ -127,10 +190,15 @@ export class DownloaderService {
 
   getLibraryPaths(info: VersionInfo, gameDir: string): string[] {
     const libsDir = path.join(gameDir, 'libraries')
-    return this.filterLibs(info.libraries)
-      .filter(l => l.downloads.artifact)
-      .map(l => path.join(libsDir, l.downloads.artifact!.path))
-      .filter(p => fs.existsSync(p))
+    const out: string[] = []
+    for (const lib of this.filterLibs(info.libraries)) {
+      const art = libArtifact(lib)
+      if (!art) continue
+      const p = path.join(libsDir, art.path)
+      if (fs.existsSync(p)) out.push(p)
+      else log.warn('Falta libreria en el classpath:', p)
+    }
+    return out
   }
 
   private osName() {
@@ -162,7 +230,7 @@ export class DownloaderService {
     url: string, dest: string, sha1?: string,
     onProgress?: (dl: number, total: number, speed: number) => void
   ) {
-    validateUrl(url)
+    validateUrl(url, true)
     const res = await axios.get(url, {
       responseType: 'arraybuffer',
       timeout: 120000,

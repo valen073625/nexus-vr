@@ -1,6 +1,6 @@
 {
   "name": "nexus-launcher",
-  "version": "1.0.3",
+  "version": "1.1.0",
   "description": "Nexus Launcher - Launcher para Minecraft: Java Edition",
   "main": "dist/main/main.js",
   "author": "Nexus Launcher",
@@ -39,11 +39,28 @@
   "build": {
     "appId": "com.nexuslauncher.app",
     "productName": "Nexus Launcher",
-    "directories": { "output": "release" },
-    "files": ["dist/**/*", "package.json"],
-    "extraResources": [{ "from": "assets/icon.ico", "to": "icon.ico" }],
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "assets/icon.ico",
+        "to": "icon.ico"
+      }
+    ],
     "win": {
-      "target": [{ "target": "nsis", "arch": ["x64"] }],
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
       "icon": "assets/icon.ico"
     },
     "nsis": {

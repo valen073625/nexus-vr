@@ -30,7 +30,24 @@ export interface LaunchOptions {
   profileType: 'microsoft' | 'offline'
   profileData: { username: string; uuid: string; accessToken?: string }
   optimize?: OptimizeOptions
+  /** Carpeta de la instancia (mods, mundos, options.txt). Si falta, se usa gameDir. */
+  instanceDir?: string
 }
+
+/** Flags de JVM para PCs modestas. Compatibles con Java 8 a 25. La RAM (-Xmx) la fija el usuario aparte. */
+const LOW_END_JVM_FLAGS = [
+  '-XX:+UseG1GC',
+  '-XX:+ParallelRefProcEnabled',
+  '-XX:MaxGCPauseMillis=100',
+  '-XX:+UnlockExperimentalVMOptions',
+  '-XX:+DisableExplicitGC',
+  '-XX:G1NewSizePercent=20',
+  '-XX:G1ReservePercent=20',
+  '-XX:SurvivorRatio=32',
+  '-XX:MaxTenuringThreshold=1',
+  '-XX:+PerfDisableSharedMem',
+  '-Dsun.rmi.dgc.server.gcInterval=2147483646',
+]
 
 function writeOptions(gameDir: string, opt: OptimizeOptions) {
   const file = path.join(gameDir, 'options.txt')
@@ -65,9 +82,10 @@ export class LauncherService {
   private skins = new SkinsService()
 
   async launch(opts: LaunchOptions): Promise<void> {
-    const info = await this.vs.getVersionInfo(opts.versionId)
-    fs.mkdirSync(opts.gameDir, { recursive: true })
-    if (opts.optimize?.enabled) writeOptions(opts.gameDir, opts.optimize)
+    const info = await this.vs.getVersionInfo(opts.versionId, opts.gameDir)
+    const runDir = opts.instanceDir ?? opts.gameDir
+    fs.mkdirSync(runDir, { recursive: true })
+    if (opts.optimize?.enabled) writeOptions(runDir, opts.optimize)
 
     let agentArg: string | null = null
     try {
@@ -87,7 +105,7 @@ export class LauncherService {
     const args = this.buildArgs(info, opts, agentArg)
     log.info('RAM efectiva', args.find(a => a.startsWith('-Xmx')), args.find(a => a.startsWith('-Xms')))
     const proc = spawn(opts.javaPath, args, {
-      cwd: opts.gameDir,
+      cwd: runDir,
       detached: true,
       stdio: 'ignore',
       windowsHide: false,
@@ -108,7 +126,11 @@ export class LauncherService {
     const maxRam = Math.max(512, Number(opts.maxRam) || 2048)
     const minRam = Math.min(Math.max(256, Number(opts.minRam) || 512), maxRam)
 
+    const sep = process.platform === 'win32' ? ';' : ':'
+    const runDir = opts.instanceDir ?? opts.gameDir
+
     if (agentArg) args.push(agentArg)
+    if (opts.optimize?.enabled) args.push(...LOW_END_JVM_FLAGS)
     args.push(`-Djava.library.path=${nativDir}`)
     args.push('-Dminecraft.launcher.brand=nexus-launcher')
     args.push('-Dminecraft.launcher.version=1.0.3')
@@ -120,6 +142,10 @@ export class LauncherService {
         launcher_name: 'nexus-launcher',
         launcher_version: '1.0.3',
         classpath: cp,
+        version_name: opts.versionId,
+        library_directory: path.join(opts.gameDir, 'libraries'),
+        classpath_separator: sep,
+        primary_jar_name: `${opts.versionId}.jar`,
       }
       for (const arg of this.resolveArgs(info.arguments.jvm, jvmVars)) {
         if (arg.startsWith('-Xmx') || arg.startsWith('-Xms')) continue
@@ -150,7 +176,7 @@ export class LauncherService {
     const gameVars: Record<string, string> = {
       auth_player_name: opts.profileData.username,
       version_name: opts.versionId,
-      game_directory: opts.gameDir,
+      game_directory: runDir,
       assets_root: assetsDir,
       assets_index_name: info.assets,
       auth_uuid: opts.profileData.uuid,

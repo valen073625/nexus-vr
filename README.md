@@ -51,3 +51,11 @@ npx electron-builder --win --x64
 
 - Node.js 20+
 - Windows 10/11 x64 (para el .exe)
+
+## Novedades 1.1
+
+- Loaders: Fabric, Quilt, Forge y NeoForge (se instalan solos).
+- Explorar: mods, modpacks (.mrpack y CurseForge), resource packs y shaders desde Modrinth y CurseForge (esta última necesita tu clave de API gratuita en Configuración).
+- Dentro de Minecraft: contador de FPS/ms (mod `fps-overlay`) y modo Optimizar (Sodium, Lithium, FerriteCore...). Requieren un loader.
+- Cada loader/modpack tiene su propia carpeta de mods y mundos.
+- Página de descarga: `docs/index.html` (GitHub Pages).

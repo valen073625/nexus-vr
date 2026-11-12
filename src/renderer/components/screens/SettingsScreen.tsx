@@ -6,6 +6,8 @@ export function SettingsScreen() {
   const [maxRam, setMaxRam] = useState(2048)
   const [minRam, setMinRam] = useState(512)
   const [jvmArgs, setJvmArgs] = useState('')
+  const [cfKey, setCfKey] = useState('')
+  const [keepOpen, setKeepOpen] = useState(false)
   const [saved, setSaved] = useState(false)
   const [javaStatus, setJavaStatus] = useState<'idle' | 'checking' | 'found' | 'missing'>('idle')
   const [javaWipe, setJavaWipe] = useState('')
@@ -17,6 +19,8 @@ export function SettingsScreen() {
       setMaxRam(Number(s.maxRam) || 2048)
       setMinRam(Number(s.minRam) || 512)
       setJvmArgs(s.jvmArgs ?? '')
+      setCfKey(s.curseforgeApiKey ?? '')
+      setKeepOpen(!!s.keepLauncherOpen)
     })
   }, [])
 
@@ -25,7 +29,7 @@ export function SettingsScreen() {
     const min = Math.min(minRam, max)
     setMaxRam(max)
     setMinRam(min)
-    await window.nexus.settings.save({ gameDir, javaPath, maxRam: max, minRam: min, jvmArgs })
+    await window.nexus.settings.save({ gameDir, javaPath, maxRam: max, minRam: min, jvmArgs, curseforgeApiKey: cfKey.trim(), keepLauncherOpen: keepOpen })
     setSaved(true)
     setTimeout(() => setSaved(false), 2000)
   }
@@ -87,6 +91,17 @@ export function SettingsScreen() {
         <label>Minima: {minRam} MB</label>
         <input type="range" min={256} max={8192} step={256} value={minRam} className="slider" onChange={e => setMinRam(parseInt(e.target.value, 10))} />
       </div>
+      <div className="card">
+        <h3>Launcher</h3>
+        <label className="checkbox"><input type="checkbox" checked={keepOpen} onChange={e => setKeepOpen(e.target.checked)} />Mantener el launcher abierto al iniciar Minecraft</label>
+      </div>
+
+      <div className="card">
+        <h3>CurseForge</h3>
+        <p className="card-desc">Para buscar en CurseForge necesitás una clave de API gratuita de console.curseforge.com. Modrinth funciona sin clave.</p>
+        <input className="text-input" type="password" placeholder="Clave de API de CurseForge" value={cfKey} onChange={e => setCfKey(e.target.value)} />
+      </div>
+
       <div className="card">
         <h3>Argumentos JVM</h3>
         <textarea className="textarea" value={jvmArgs} onChange={e => setJvmArgs(e.target.value)} rows={3} />

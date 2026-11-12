@@ -31,7 +31,23 @@ declare global {
         getVersionInfo: (id: string) => Promise<{ success: boolean; info?: any; error?: string }>
       }
       launcher: {
-        launch: (opts: any) => Promise<{ success: boolean; error?: string }>
+        launch: (opts: any) => Promise<{ success: boolean; error?: string; notices?: string[] }>
+      }
+      loaders: {
+        availability: (mc: string) => Promise<{ success: boolean; availability?: Record<'fabric' | 'quilt' | 'forge' | 'neoforge', boolean>; error?: string }>
+      }
+      instances: {
+        list: () => Promise<{ id: string; name: string; mcVersion: string; loader: string; modpack?: boolean }[]>
+        remove: (id: string) => Promise<{ success: boolean; error?: string }>
+      }
+      content: {
+        search: (o: any) => Promise<{ success: boolean; items: any[]; total: number; error?: string }>
+        install: (o: any) => Promise<{ success: boolean; installed: string[]; skipped: string[]; message?: string; instance?: any }>
+        installed: (mc: string, loader: string, instanceId?: string) => Promise<{ success: boolean; mods?: { name: string; size: number }[]; resourcepacks?: { name: string; size: number }[]; shaders?: { name: string; size: number }[]; error?: string }>
+        remove: (o: any) => Promise<{ success: boolean; error?: string }>
+      }
+      app: {
+        openExternal: (url: string) => Promise<boolean>
       }
       java: {
         detect: (versionId: string) => Promise<{ success: boolean; javaPath?: string; error?: string }>
