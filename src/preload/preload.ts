@@ -29,6 +29,7 @@ const api = {
   versions: {
     getManifest: () => ipcRenderer.invoke('versions:getManifest'),
     getVersionInfo: (id: string) => ipcRenderer.invoke('versions:getVersionInfo', id),
+    installed: () => ipcRenderer.invoke('versions:installed'),
   },
   launcher: {
     launch: (opts: any) => ipcRenderer.invoke('launcher:launch', opts),

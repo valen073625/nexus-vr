@@ -42,6 +42,7 @@ export function MainScreen() {
   const [error, setError] = useState('')
   const [notices, setNotices] = useState<string[]>([])
   const [loadingV, setLoadingV] = useState(true)
+  const [dl, setDl] = useState<{ vanilla: string[]; loaders: { id: string; mc: string; loader: string }[] }>({ vanilla: [], loaders: [] })
 
   const refreshInsts = useCallback(() => window.nexus.instances.list().then(setInsts), [])
 
@@ -55,13 +56,21 @@ export function MainScreen() {
       setHud(!!s.showHud)
       if (s.selectedLoader) setLoader(s.selectedLoader)
       refreshInsts()
+      const inst = await window.nexus.versions.installed()
+      setDl(inst)
       try {
         const r = await window.nexus.versions.getManifest()
         if (r.success && r.manifest) {
           setVersions(r.manifest.versions)
           setSelected(s.selectedVersion || r.manifest.latest.release)
-        } else setError('No se pudo cargar las versiones: ' + (r.error ?? ''))
-      } catch (e: any) { setError('Error de red: ' + e.message) }
+        } else throw new Error(r.error ?? '')
+      } catch (e: any) {
+        // Sin internet: se muestran las versiones ya descargadas
+        if (inst.vanilla.length) {
+          setVersions(inst.vanilla.map(id => ({ id, type: 'release' })))
+          setSelected(s.selectedVersion && inst.vanilla.includes(s.selectedVersion) ? s.selectedVersion : inst.vanilla[0])
+        } else setError('No se pudo cargar las versiones: ' + e.message)
+      }
       finally { setLoadingV(false) }
     })()
   }, [refreshInsts])
@@ -135,7 +144,7 @@ export function MainScreen() {
     }
   }, [selected, activeProfile, effLoader, instId, maxRam, minRam, optimize, hud, opt, setScreen, setDownloadProgress])
 
-  const shown = versions.filter(v => okVersion(v) && (v.type === 'release' || (showSnaps && v.type === 'snapshot')))
+  const shown = versions.filter(v => dl.vanilla.includes(v.id) || (okVersion(v) && (v.type === 'release' || (showSnaps && v.type === 'snapshot'))))
   const fmt = (m: number) => (m >= 1024 ? `${(m / 1024).toFixed(1)} GB` : `${m} MB`)
 
   return (
@@ -162,7 +171,7 @@ export function MainScreen() {
             <label>Versión de Minecraft</label>
             {loadingV ? <div className="loading-row"><span className="spin">⟳</span> Cargando versiones...</div> : (
               <select className="select" value={inst ? inst.mcVersion : selected} disabled={!!inst} onChange={e => pickVersion(e.target.value)}>
-                {shown.map(v => <option key={v.id} value={v.id}>{v.id}{v.type !== 'release' ? ` (${v.type})` : ''}</option>)}
+                {shown.map(v => <option key={v.id} value={v.id}>{dl.vanilla.includes(v.id) ? '✓ ' : ''}{v.id}{v.type !== 'release' ? ` (${v.type})` : ''}</option>)}
               </select>
             )}
             <label className="checkbox">
@@ -185,6 +194,22 @@ export function MainScreen() {
           <IconPlay /> {launching ? 'INICIANDO...' : 'JUGAR'}
         </button>
       </div>
+
+      {(dl.vanilla.length > 0 || dl.loaders.length > 0) && (
+        <div className="card">
+          <h3>Descargadas</h3>
+          <div className="chips">
+            {dl.vanilla.map(id => (
+              <button key={id} className={`chip ${!inst && selected === id && loader === 'vanilla' ? 'on' : ''}`} onClick={() => { pickVersion(id); pickLoader('vanilla') }}>{id}</button>
+            ))}
+            {dl.loaders.map(l => (
+              <button key={l.id} className={`chip ${!inst && selected === l.mc && loader === l.loader ? 'on' : ''}`} onClick={() => { pickVersion(l.mc); pickLoader(l.loader as Loader) }}>
+                {l.loader} {l.mc}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       {insts.some(i => i.modpack) && (
         <div className="card">

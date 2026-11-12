@@ -29,6 +29,7 @@ declare global {
       versions: {
         getManifest: () => Promise<{ success: boolean; manifest?: any; error?: string }>
         getVersionInfo: (id: string) => Promise<{ success: boolean; info?: any; error?: string }>
+        installed: () => Promise<{ vanilla: string[]; loaders: { id: string; mc: string; loader: string }[] }>
       }
       launcher: {
         launch: (opts: any) => Promise<{ success: boolean; error?: string; notices?: string[] }>
